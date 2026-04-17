@@ -19,11 +19,15 @@ DataHub ingestion (unchanged)          gsp-datahub-sidecar (this tool)
               (lineage lost)        DataHub GMS (lineage restored)
 ```
 
+## Install
+
+```bash
+pip install git+https://github.com/gudusoftware/gsp-datahub-sidecar.git
+```
+
 ## Quick start
 
 ```bash
-pip install gsp-datahub-sidecar
-
 # Analyze a SQL file (anonymous mode, no signup, 50 calls/day):
 gsp-datahub-sidecar --sql-file queries.sql --dry-run
 
