@@ -27,9 +27,14 @@ pip install git+https://github.com/gudusoftware/gsp-datahub-sidecar.git
 
 ## Quick start
 
+Sample SQL files are included in the `examples/` directory — try them immediately after install:
+
 ```bash
-# Analyze a SQL file (anonymous mode, no signup, 50 calls/day):
-gsp-datahub-sidecar --sql-file queries.sql --dry-run
+# Try the BigQuery procedural SQL from DataHub Issue #11654:
+gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql --dry-run
+
+# Try an Oracle CREATE VIEW with subqueries:
+gsp-datahub-sidecar --sql-file examples/oracle_create_view.sql --db-vendor dbvoracle --dry-run
 
 # Analyze inline SQL:
 gsp-datahub-sidecar --sql "DECLARE x INT; CREATE VIEW v AS SELECT a FROM t" --dry-run
