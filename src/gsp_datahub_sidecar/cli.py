@@ -42,7 +42,7 @@ def main():
             "  # Use authenticated mode with a personal key:\n"
             "  GSP_BACKEND_MODE=authenticated GSP_SQLFLOW_SECRET_KEY=sk-xxx gsp-datahub-sidecar --sql-file q.sql\n\n"
             "  # Use self-hosted Docker:\n"
-            "  gsp-datahub-sidecar --config sidecar.yaml --mode self_hosted --sqlflow-url http://sqlflow:8081/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson\n"
+            "  gsp-datahub-sidecar --config sidecar.yaml --mode self_hosted --sqlflow-url http://localhost:8165/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson\n"
         ),
     )
 

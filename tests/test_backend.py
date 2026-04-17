@@ -76,7 +76,7 @@ def test_authenticated_401():
 
 @responses.activate
 def test_self_hosted_success():
-    url = "http://localhost:8081/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson"
+    url = "http://localhost:8165/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
     responses.add(responses.POST, url, json=MOCK_SUCCESS, status=200)
 
     backend = SelfHostedBackend(url=url)
@@ -89,7 +89,7 @@ def test_self_hosted_success():
 
 @responses.activate
 def test_self_hosted_with_key():
-    url = "http://localhost:8081/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson"
+    url = "http://localhost:8165/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
     responses.add(responses.POST, url, json=MOCK_SUCCESS, status=200)
 
     backend = SelfHostedBackend(url=url, secret_key="sk-local")

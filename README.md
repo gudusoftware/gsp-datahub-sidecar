@@ -71,7 +71,7 @@ gsp-datahub-sidecar --mode authenticated --secret-key sk-your-key-here --sql-fil
 
 ```bash
 gsp-datahub-sidecar --mode self_hosted \
-  --sqlflow-url http://sqlflow:8081/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson \
+  --sqlflow-url http://localhost:8165/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson \
   --sql-file queries.sql
 ```
 
