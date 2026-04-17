@@ -3,8 +3,12 @@
 # Three backend modes — uncomment the one you need:
 #
 #   anonymous   : No signup needed. 50 calls/day per IP. Good for evaluation.
-#   authenticated: Personal API key. 10k calls/month. Sign up at https://docs.gudusoft.com/sign-up/
+#   authenticated: userId + secretKey on api.gudusoft.com. 10k calls/month.
+#                  Sign up at https://docs.gudusoft.com/sign-up/
 #   self_hosted : Your own SQLFlow Docker. Unlimited. Data stays in your VPC.
+#
+# `authenticated` and `self_hosted` use the same SQLFlow token-exchange
+# protocol (userId + secretKey -> JWT -> lineage call) — only the host differs.
 #
 # All settings can be overridden with environment variables:
 #   GSP_BACKEND_MODE, GSP_SQLFLOW_URL, GSP_SQLFLOW_USER_ID, GSP_SQLFLOW_SECRET_KEY,
@@ -20,12 +24,11 @@ sqlflow:
   # Override the SQLFlow API URL (optional — each mode has a sensible default)
   # url: https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage
 
-  # For "authenticated" mode: your personal secret key
-  # secret_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-  # For "self_hosted" mode (when the SQLFlow Docker requires auth):
-  # user_id: gudu|0123456789
-  # secret_key: your-sqlflow-docker-secret-key
+  # For "authenticated" and "self_hosted" modes: your userId + secretKey.
+  # Get them from https://docs.gudusoft.com/sign-up/ (cloud) or from the
+  # SQLFlow web UI of your Docker at http://<host>:8165/ (self-hosted).
+  # user_id: your-user-id
+  # secret_key: your-secret-key
 
   # Default SQL dialect for lineage analysis
   db_vendor: dbvbigquery

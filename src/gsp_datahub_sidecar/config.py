@@ -8,10 +8,12 @@ from typing import Optional
 import yaml
 
 
-# Default API URLs per mode
+# Default API URLs per mode. The authenticated and self-hosted tiers hit the
+# same ``exportFullLineageAsJson`` endpoint via the same token-exchange flow;
+# only the host differs (cloud vs. your VPC).
 DEFAULT_URLS = {
     "anonymous": "https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage",
-    "authenticated": "https://api.gudusoft.com/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson",
+    "authenticated": "https://api.gudusoft.com/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson",
     "self_hosted": "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson",
 }
 
@@ -117,10 +119,13 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
             f"Invalid sqlflow.mode '{cfg.sqlflow.mode}'. Must be one of: {valid_modes}"
         )
 
-    if cfg.sqlflow.mode == "authenticated" and not cfg.sqlflow.secret_key:
+    if cfg.sqlflow.mode == "authenticated" and (
+        not cfg.sqlflow.user_id or not cfg.sqlflow.secret_key
+    ):
         raise ValueError(
-            "sqlflow.secret_key is required when mode is 'authenticated'. "
-            "Get a key at https://docs.gudusoft.com/sign-up/"
+            "sqlflow.user_id and sqlflow.secret_key are both required when mode is "
+            "'authenticated' — SQLFlow uses a userId + secretKey token-exchange flow. "
+            "Get credentials at https://docs.gudusoft.com/sign-up/"
         )
 
     return cfg

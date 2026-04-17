@@ -50,8 +50,10 @@ gsp-datahub-sidecar --config sidecar.yaml --log-file /var/log/datahub/ingest.log
 | Mode | Auth | Limit | Data location | Use case |
 |---|---|---|---|---|
 | `anonymous` (default) | None | 50/day per IP | SQL sent to api.gudusoft.com | Quick evaluation |
-| `authenticated` | Secret key | 10k/month | SQL sent to api.gudusoft.com | Extended evaluation |
+| `authenticated` | `userId` + `secretKey` (token-exchange) | 10k/month | SQL sent to api.gudusoft.com | Extended evaluation |
 | `self_hosted` | `userId` + `secretKey` (token-exchange) | Unlimited | SQL stays in your VPC | Production |
+
+The `authenticated` and `self_hosted` tiers use the **same** SQLFlow token-exchange protocol and hit the same `exportFullLineageAsJson` endpoint — only the host differs (api.gudusoft.com vs. your Docker).
 
 ### Anonymous (default, zero setup)
 
@@ -61,11 +63,16 @@ gsp-datahub-sidecar --sql-file queries.sql --dry-run
 
 ### Authenticated (sign up for a free key)
 
-Get a key at [docs.gudusoft.com/sign-up](https://docs.gudusoft.com/sign-up/), then:
+Sign up at [docs.gudusoft.com/sign-up](https://docs.gudusoft.com/sign-up/) to get a `userId` and `secretKey`, then:
 
 ```bash
-gsp-datahub-sidecar --mode authenticated --secret-key sk-your-key-here --sql-file queries.sql
+gsp-datahub-sidecar --mode authenticated \
+  --user-id YOUR_USER_ID \
+  --secret-key YOUR_SECRET_KEY \
+  --sql-file queries.sql
 ```
+
+The sidecar handles SQLFlow's token-exchange flow automatically (see the "How auth works" note under [Self-hosted](#self-hosted-production) — the same protocol applies).
 
 ### Self-hosted (production)
 
@@ -96,8 +103,8 @@ Copy `sidecar.yaml.example` to `sidecar.yaml` and edit. All settings can also be
 |---|---|---|
 | `GSP_BACKEND_MODE` | `sqlflow.mode` | `anonymous`, `authenticated`, or `self_hosted` |
 | `GSP_SQLFLOW_URL` | `sqlflow.url` | Override the SQLFlow API URL |
-| `GSP_SQLFLOW_USER_ID` | `sqlflow.user_id` | SQLFlow userId (self_hosted Docker with auth enabled) |
-| `GSP_SQLFLOW_SECRET_KEY` | `sqlflow.secret_key` | API key for authenticated or self_hosted mode |
+| `GSP_SQLFLOW_USER_ID` | `sqlflow.user_id` | SQLFlow userId — required for `authenticated` and `self_hosted` modes |
+| `GSP_SQLFLOW_SECRET_KEY` | `sqlflow.secret_key` | SQLFlow secretKey — required for `authenticated` and `self_hosted` modes |
 | `GSP_DB_VENDOR` | `sqlflow.db_vendor` | SQL dialect (default: `dbvbigquery`) |
 | `GSP_DATAHUB_SERVER` | `datahub.server` | DataHub GMS URL |
 | `GSP_DATAHUB_TOKEN` | `datahub.token` | DataHub auth token |

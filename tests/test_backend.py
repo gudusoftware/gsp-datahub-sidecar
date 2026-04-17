@@ -27,6 +27,11 @@ MOCK_429 = {
 }
 
 
+def _body(call) -> str:
+    b = call.request.body
+    return b.decode() if isinstance(b, bytes) else (b or "")
+
+
 @responses.activate
 def test_anonymous_success():
     url = "https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage"
@@ -51,26 +56,53 @@ def test_anonymous_rate_limit():
     assert "docs.gudusoft.com/docker/" in str(exc_info.value)
 
 
-@responses.activate
-def test_authenticated_success():
-    url = "https://api.gudusoft.com/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson"
-    responses.add(responses.POST, url, json=MOCK_SUCCESS, status=200)
+AUTHENTICATED_LINEAGE_URL = (
+    "https://api.gudusoft.com/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
+)
+AUTHENTICATED_TOKEN_URL = "https://api.gudusoft.com/gspLive_backend/user/generateToken"
 
-    backend = AuthenticatedBackend(url=url, secret_key="sk-test")
+
+@responses.activate
+def test_authenticated_token_flow():
+    """Authenticated (cloud) mode uses the same token-exchange flow as self-hosted."""
+    responses.add(
+        responses.POST,
+        AUTHENTICATED_TOKEN_URL,
+        json={"code": "200", "userId": "cloud-user", "token": "jwt-cloud"},
+        status=200,
+    )
+    responses.add(responses.POST, AUTHENTICATED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+
+    backend = AuthenticatedBackend(url=AUTHENTICATED_LINEAGE_URL, user_id="cloud-user", secret_key="sk-test")
     result = backend.get_lineage("SELECT 1", "dbvbigquery")
     assert result["code"] == 200
 
-    # Verify auth header was sent
-    assert responses.calls[0].request.headers["Authorization"] == "Bearer sk-test"
+    # Token exchange happens against api.gudusoft.com (no /api/ prefix).
+    assert responses.calls[0].request.url == AUTHENTICATED_TOKEN_URL
+    token_body = _body(responses.calls[0])
+    assert "userId=cloud-user" in token_body
+    assert "secretKey=sk-test" in token_body
+
+    # Lineage call sends userId + token, not a Bearer header.
+    lineage_body = _body(responses.calls[1])
+    assert "userId=cloud-user" in lineage_body
+    assert "token=jwt-cloud" in lineage_body
+    assert "secretKey" not in lineage_body
+    assert "Authorization" not in responses.calls[1].request.headers
 
 
 @responses.activate
-def test_authenticated_401():
-    url = "https://api.gudusoft.com/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson"
-    responses.add(responses.POST, url, json={"code": 401}, status=401)
+def test_authenticated_token_generation_failure():
+    """Bad credentials surface the server's error message."""
+    responses.add(
+        responses.POST,
+        AUTHENTICATED_TOKEN_URL,
+        json={"code": "401", "error": "Invalid user or token, access deny."},
+        status=200,
+    )
 
-    backend = AuthenticatedBackend(url=url, secret_key="sk-bad")
-    with pytest.raises(SQLFlowError, match="Authentication failed"):
+    backend = AuthenticatedBackend(url=AUTHENTICATED_LINEAGE_URL, user_id="cloud-user", secret_key="sk-bad")
+    with pytest.raises(SQLFlowError, match="token generation failed"):
         backend.get_lineage("SELECT 1", "dbvbigquery")
 
 
@@ -78,11 +110,6 @@ SELF_HOSTED_LINEAGE_URL = (
     "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
 )
 SELF_HOSTED_TOKEN_URL = "http://localhost:8165/api/gspLive_backend/user/generateToken"
-
-
-def _body(call) -> str:
-    b = call.request.body
-    return b.decode() if isinstance(b, bytes) else (b or "")
 
 
 @responses.activate
@@ -217,9 +244,11 @@ def test_create_backend_anonymous():
 
 
 def test_create_backend_authenticated():
-    cfg = SQLFlowConfig(mode="authenticated", secret_key="sk-test")
+    cfg = SQLFlowConfig(mode="authenticated", user_id="cloud-user", secret_key="sk-test")
     backend = create_backend(cfg)
     assert isinstance(backend, AuthenticatedBackend)
+    assert backend.user_id == "cloud-user"
+    assert backend.secret_key == "sk-test"
 
 
 def test_create_backend_self_hosted():

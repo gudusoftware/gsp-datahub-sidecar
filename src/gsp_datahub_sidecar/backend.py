@@ -72,42 +72,25 @@ class AnonymousBackend(SQLFlowBackend):
         return resp.json()
 
 
-class AuthenticatedBackend(SQLFlowBackend):
-    """Tier 2: Personal API key (secret key). Higher quota."""
+class TokenExchangeBackend(SQLFlowBackend):
+    """Shared base for ``authenticated`` (cloud) and ``self_hosted`` (Docker) modes.
 
-    def __init__(self, url: str, secret_key: str):
-        self.url = url
-        self.secret_key = secret_key
-
-    def get_lineage(self, sql: str, db_vendor: str, **kwargs) -> dict[str, Any]:
-        payload = self._build_payload(sql, db_vendor, **kwargs)
-        headers = {"Authorization": f"Bearer {self.secret_key}"}
-        resp = requests.post(self.url, json=payload, headers=headers, timeout=120)
-
-        if resp.status_code == 401:
-            raise SQLFlowError(
-                "Authentication failed. Check your secret_key in sidecar.yaml. "
-                "Get a key at https://docs.gudusoft.com/sign-up/",
-                status_code=401,
-            )
-        resp.raise_for_status()
-        return resp.json()
-
-
-class SelfHostedBackend(SQLFlowBackend):
-    """Tier 3: Self-hosted SQLFlow Docker. Unlimited, data stays in VPC.
-
-    SQLFlow Docker uses a two-step auth flow (see
+    Both tiers use SQLFlow's two-step protocol (see SQLFlow's
     https://github.com/sqlparser/sqlflow_public/blob/master/api/python/basic/GenerateToken.py):
 
-    1. POST ``/api/gspLive_backend/user/generateToken`` with ``userId`` +
-       ``secretKey`` (form-encoded) -> receive a short-lived ``token``.
+    1. POST ``.../gspLive_backend/user/generateToken`` with ``userId`` +
+       ``secretKey`` (form-encoded) -> receive a short-lived JWT ``token``.
     2. POST the lineage endpoint with ``userId`` + ``token`` (form-encoded) —
        NOT the raw ``secretKey``.
 
     The demo user ``gudu|0123456789`` is a special case: the literal string
     ``"token"`` is accepted without calling generateToken.
+
+    Subclasses differ only in their default URL and log label.
     """
+
+    # Used only in log/error messages to distinguish tiers.
+    label: str = "SQLFlow"
 
     def __init__(self, url: str, user_id: str | None = None, secret_key: str | None = None):
         self.url = url
@@ -119,7 +102,9 @@ class SelfHostedBackend(SQLFlowBackend):
         """Derive the generateToken URL from the lineage URL.
 
         Given ``.../gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson``
-        this returns ``.../gspLive_backend/user/generateToken``.
+        this returns ``.../gspLive_backend/user/generateToken``. Works for both
+        api.gudusoft.com (no ``/api/`` prefix) and self-hosted Docker
+        (``/api/gspLive_backend/...``).
         """
         marker = "/gspLive_backend/"
         idx = self.url.find(marker)
@@ -140,12 +125,12 @@ class SelfHostedBackend(SQLFlowBackend):
             return self._token
         if not self.user_id or not self.secret_key:
             raise SQLFlowError(
-                "Self-hosted SQLFlow requires user_id + secret_key to generate a token. "
-                "Set sqlflow.user_id / sqlflow.secret_key, or pass --user-id / --secret-key."
+                f"{self.label} requires user_id + secret_key to generate a token. "
+                f"Set sqlflow.user_id / sqlflow.secret_key, or pass --user-id / --secret-key."
             )
 
         token_url = self._token_url()
-        logger.debug("Requesting SQLFlow token from %s", token_url)
+        logger.debug("Requesting %s token from %s", self.label, token_url)
         resp = requests.post(
             token_url,
             data={"userId": self.user_id, "secretKey": self.secret_key},
@@ -153,7 +138,7 @@ class SelfHostedBackend(SQLFlowBackend):
         )
         if resp.status_code != 200:
             raise SQLFlowError(
-                f"Token request to {token_url} returned HTTP {resp.status_code}. "
+                f"{self.label} token request to {token_url} returned HTTP {resp.status_code}. "
                 f"Response: {resp.text[:500]}",
                 status_code=resp.status_code,
             )
@@ -161,7 +146,7 @@ class SelfHostedBackend(SQLFlowBackend):
         # generateToken returns code as a string ("200"), unlike other endpoints.
         if str(body.get("code")) != "200" or not body.get("token"):
             raise SQLFlowError(
-                f"SQLFlow token generation failed: {body.get('error') or body}",
+                f"{self.label} token generation failed: {body.get('error') or body}",
                 response_body=body,
             )
         self._token = body["token"]
@@ -177,7 +162,7 @@ class SelfHostedBackend(SQLFlowBackend):
 
         if resp.status_code != 200:
             raise SQLFlowError(
-                f"Self-hosted SQLFlow returned HTTP {resp.status_code} from {self.url}. "
+                f"{self.label} returned HTTP {resp.status_code} from {self.url}. "
                 f"Response: {resp.text[:500]}",
                 status_code=resp.status_code,
             )
@@ -188,7 +173,7 @@ class SelfHostedBackend(SQLFlowBackend):
         if code not in (None, 200, "200"):
             # If the token expired, retry once with a fresh token.
             if str(code) == "401" and self._token is not None:
-                logger.info("SQLFlow token rejected — refreshing and retrying once.")
+                logger.info("%s token rejected — refreshing and retrying once.", self.label)
                 self._token = None
                 payload["token"] = self._get_token()
                 resp = requests.post(self.url, data=payload, timeout=120)
@@ -196,12 +181,29 @@ class SelfHostedBackend(SQLFlowBackend):
                 code = body.get("code") if isinstance(body, dict) else None
             if code not in (None, 200, "200"):
                 raise SQLFlowError(
-                    f"Self-hosted SQLFlow returned error code {code}: "
+                    f"{self.label} returned error code {code}: "
                     f"{body.get('error') or body}",
                     status_code=int(code) if str(code).isdigit() else 0,
                     response_body=body,
                 )
         return body
+
+
+class AuthenticatedBackend(TokenExchangeBackend):
+    """Tier 2: Personal API key on api.gudusoft.com. 10k calls/month.
+
+    Uses the same token-exchange protocol as the self-hosted tier — the only
+    difference is the default URL points at api.gudusoft.com instead of a
+    local Docker.
+    """
+
+    label = "Authenticated SQLFlow"
+
+
+class SelfHostedBackend(TokenExchangeBackend):
+    """Tier 3: Self-hosted SQLFlow Docker. Unlimited, data stays in VPC."""
+
+    label = "Self-hosted SQLFlow"
 
 
 def create_backend(config: SQLFlowConfig) -> SQLFlowBackend:
@@ -214,7 +216,7 @@ def create_backend(config: SQLFlowConfig) -> SQLFlowBackend:
 
     if config.mode == "authenticated":
         logger.info("Using authenticated backend: %s", url)
-        return AuthenticatedBackend(url=url, secret_key=config.secret_key)
+        return AuthenticatedBackend(url=url, user_id=config.user_id, secret_key=config.secret_key)
 
     if config.mode == "self_hosted":
         logger.info("Using self-hosted backend: %s", url)

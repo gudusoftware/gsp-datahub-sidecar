@@ -18,12 +18,14 @@ def test_defaults():
 
 def test_yaml_loading(monkeypatch):
     # Clear env vars that would override YAML
+    monkeypatch.delenv("GSP_SQLFLOW_USER_ID", raising=False)
     monkeypatch.delenv("GSP_SQLFLOW_SECRET_KEY", raising=False)
     monkeypatch.delenv("GSP_DATAHUB_TOKEN", raising=False)
 
     yaml_content = """
 sqlflow:
   mode: authenticated
+  user_id: cloud-user-123
   secret_key: sk-test123
   db_vendor: dbvoracle
 datahub:
@@ -36,6 +38,7 @@ datahub:
         cfg = load_config(f.name)
 
     assert cfg.sqlflow.mode == "authenticated"
+    assert cfg.sqlflow.user_id == "cloud-user-123"
     assert cfg.sqlflow.secret_key == "sk-test123"
     assert cfg.sqlflow.db_vendor == "dbvoracle"
     assert cfg.datahub.server == "http://gms:8080"
@@ -72,9 +75,11 @@ sqlflow:
     os.unlink(f.name)
 
 
-def test_authenticated_requires_secret_key(monkeypatch):
+def test_authenticated_requires_user_id_and_secret_key(monkeypatch):
+    monkeypatch.delenv("GSP_SQLFLOW_USER_ID", raising=False)
     monkeypatch.delenv("GSP_SQLFLOW_SECRET_KEY", raising=False)
 
+    # Neither set
     yaml_content = """
 sqlflow:
   mode: authenticated
@@ -82,7 +87,20 @@ sqlflow:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         f.flush()
-        with pytest.raises(ValueError, match="secret_key is required"):
+        with pytest.raises(ValueError, match="user_id and sqlflow.secret_key"):
+            load_config(f.name)
+    os.unlink(f.name)
+
+    # Only secret_key set — user_id still required
+    yaml_content = """
+sqlflow:
+  mode: authenticated
+  secret_key: sk-test
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        with pytest.raises(ValueError, match="user_id and sqlflow.secret_key"):
             load_config(f.name)
     os.unlink(f.name)
 
