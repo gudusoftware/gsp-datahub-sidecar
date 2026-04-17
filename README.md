@@ -80,6 +80,37 @@ gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql
 | Build DataHub MCPs | Yes | Yes |
 | **Send MCPs to DataHub GMS** | **No** (logs what it would send) | **Yes** |
 
+## Verify lineage in DataHub
+
+After emitting lineage (live mode, no `--dry-run`), verify it in three ways:
+
+**1. DataHub Web UI (recommended)**
+
+Open DataHub in your browser (e.g. `http://datahub-frontend:9002`), search for the downstream table name, and click the **Lineage** tab. You should see arrows connecting upstream tables to downstream tables.
+
+For the BigQuery procedural example, search for `temp_table` or `final_output`:
+
+```
+project.dataset.view_name  ──>  temp_table       (6 columns)
+temp_table_delta           ──>  final_output     (5 columns)
+```
+
+**2. DataHub CLI**
+
+```bash
+# Check lineage for a specific dataset:
+datahub get --urn "urn:li:dataset:(urn:li:dataPlatform:bigquery,temp_table,PROD)" --aspect upstreamLineage
+```
+
+**3. DataHub GMS REST API**
+
+```bash
+# Query the lineage aspect directly:
+curl -s "http://datahub-gms:8080/aspects/urn%3Ali%3Adataset%3A(urn%3Ali%3AdataPlatform%3Abigquery%2Ctemp_table%2CPROD)?aspect=upstreamLineage" | python3 -m json.tool
+```
+
+If the lineage appears, the sidecar successfully recovered what sqlglot missed.
+
 ## Three backend modes
 
 | Mode | Auth | Limit | Data location | Use case |
