@@ -3,7 +3,7 @@
 # Three backend modes — uncomment the one you need:
 #
 #   anonymous   : No signup needed. 50 calls/day per IP. Good for evaluation.
-#   authenticated: Personal API key. 500 calls/day. Sign up at https://gudusoft.com/sqlflow/get-key
+#   authenticated: Personal API key. 500 calls/day. Sign up at https://sqlflow.gudusoft.com/get-key
 #   self_hosted : Your own SQLFlow Docker. Unlimited. Data stays in your VPC.
 #
 # All settings can be overridden with environment variables:

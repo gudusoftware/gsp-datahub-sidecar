@@ -117,7 +117,7 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
     if cfg.sqlflow.mode == "authenticated" and not cfg.sqlflow.secret_key:
         raise ValueError(
             "sqlflow.secret_key is required when mode is 'authenticated'. "
-            "Get a key at https://gudusoft.com/sqlflow/get-key"
+            "Get a key at https://sqlflow.gudusoft.com/get-key"
         )
 
     return cfg

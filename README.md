@@ -1,6 +1,6 @@
 # gsp-datahub-sidecar
 
-Recover BigQuery procedural-SQL lineage that DataHub's sqlglot parser misses, using [Gudu SQLFlow](https://gudusoft.com).
+Recover BigQuery procedural-SQL lineage that DataHub's sqlglot parser misses, using [Gudu SQLFlow](https://sqlflow.gudusoft.com).
 
 ## The problem
 
@@ -176,7 +176,7 @@ gsp-datahub-sidecar --sql-file queries.sql --dry-run
 
 ### Authenticated (sign up for a free key)
 
-Get a key at [gudusoft.com/sqlflow/get-key](https://gudusoft.com/sqlflow/get-key), then:
+Get a key at [gudusoft.com/sqlflow/get-key](https://sqlflow.gudusoft.com/get-key), then:
 
 ```bash
 gsp-datahub-sidecar --mode authenticated --secret-key sk-your-key-here --sql-file queries.sql
@@ -207,4 +207,4 @@ Copy `sidecar.yaml.example` to `sidecar.yaml` and edit. All settings can also be
 
 ## Licensing
 
-This sidecar (glue code) is Apache 2.0 licensed. [Gudu SQLFlow](https://gudusoft.com) is a commercial product by Gudu Software. The anonymous tier provides free evaluation access. For production use, deploy the self-hosted SQLFlow Docker with a license.
+This sidecar (glue code) is Apache 2.0 licensed. [Gudu SQLFlow](https://sqlflow.gudusoft.com) is a commercial product by Gudu Software. The anonymous tier provides free evaluation access. For production use, deploy the self-hosted SQLFlow Docker with a license.
