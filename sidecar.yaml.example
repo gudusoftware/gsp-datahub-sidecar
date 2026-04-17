@@ -1,0 +1,57 @@
+# gsp-datahub-sidecar configuration
+#
+# Three backend modes — uncomment the one you need:
+#
+#   anonymous   : No signup needed. 50 calls/day per IP. Good for evaluation.
+#   authenticated: Personal API key. 500 calls/day. Sign up at https://gudusoft.com/sqlflow/get-key
+#   self_hosted : Your own SQLFlow Docker. Unlimited. Data stays in your VPC.
+#
+# All settings can be overridden with environment variables:
+#   GSP_BACKEND_MODE, GSP_SQLFLOW_URL, GSP_SQLFLOW_SECRET_KEY,
+#   GSP_DATAHUB_SERVER, GSP_DATAHUB_TOKEN, GSP_DB_VENDOR
+
+# ---------------------------------------------------------------------------
+# SQLFlow backend
+# ---------------------------------------------------------------------------
+sqlflow:
+  # Backend mode: anonymous | authenticated | self_hosted
+  mode: anonymous
+
+  # Override the SQLFlow API URL (optional — each mode has a sensible default)
+  # url: https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage
+
+  # For "authenticated" mode: your personal secret key
+  # secret_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  # Default SQL dialect for lineage analysis
+  db_vendor: dbvbigquery
+
+  # Relation types to request (comma-separated: fdd, fdr, join, call, er)
+  show_relation_type: fdd
+
+# ---------------------------------------------------------------------------
+# DataHub connection
+# ---------------------------------------------------------------------------
+datahub:
+  # DataHub GMS server URL
+  server: http://localhost:8080
+
+  # DataHub auth token (if authentication is enabled)
+  # token: eyJhbGciOi...
+
+  # DataHub platform name (used in dataset URN construction)
+  platform: bigquery
+
+  # DataHub environment (PROD, DEV, STAGING)
+  env: PROD
+
+# ---------------------------------------------------------------------------
+# Log parsing
+# ---------------------------------------------------------------------------
+log_parser:
+  # Path to DataHub ingestion log file
+  # log_file: /var/log/datahub/ingest.log
+
+  # Or: provide SQL files/statements directly (bypass log parsing)
+  # sql_file: /path/to/queries.sql
+  # sql_text: "SELECT a FROM t"
