@@ -43,6 +43,43 @@ gsp-datahub-sidecar --sql "DECLARE x INT; CREATE VIEW v AS SELECT a FROM t" --dr
 gsp-datahub-sidecar --config sidecar.yaml --log-file /var/log/datahub/ingest.log
 ```
 
+## Dry run vs. live mode
+
+`--dry-run` does everything **except** sending lineage to DataHub — safe to run anytime, no DataHub server needed:
+
+```bash
+# Dry run: parse SQL, extract lineage, show what would be sent (no DataHub needed)
+gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql --dry-run
+```
+
+Without `--dry-run`, lineage is written to a running DataHub GMS. Point to your DataHub server with `--datahub-server`:
+
+```bash
+# Emit lineage to DataHub running on your cluster:
+gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql \
+  --datahub-server http://datahub-gms:8080
+
+# If DataHub has authentication enabled, add a token:
+gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql \
+  --datahub-server http://datahub-gms:8080 \
+  --datahub-token eyJhbGciOi...
+```
+
+Or set these in `sidecar.yaml` / environment variables so you don't repeat them:
+
+```bash
+export GSP_DATAHUB_SERVER=http://datahub-gms:8080
+export GSP_DATAHUB_TOKEN=eyJhbGciOi...
+gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql
+```
+
+| Step | `--dry-run` | live (no flag) |
+|---|---|---|
+| Call SQLFlow API to parse SQL | Yes | Yes |
+| Extract lineage from response | Yes | Yes |
+| Build DataHub MCPs | Yes | Yes |
+| **Send MCPs to DataHub GMS** | **No** (logs what it would send) | **Yes** |
+
 ## Three backend modes
 
 | Mode | Auth | Limit | Data location | Use case |
