@@ -74,6 +74,21 @@ gsp-datahub-sidecar --mode authenticated \
 
 The sidecar handles SQLFlow's token-exchange flow automatically.
 
+> **Shell escaping.** Cloud userIds typically contain `|` (e.g. `auth0|605f3cfe...`), which bash treats as a pipe. Always **single-quote** the value — or escape the `|` with a backslash — so the shell doesn't split the command:
+>
+> ```bash
+> # Good: single quotes prevent shell expansion
+> --user-id 'auth0|605f3cfe4e52d60069bcb258'
+>
+> # Also fine: backslash-escaped pipe
+> --user-id auth0\|605f3cfe4e52d60069bcb258
+>
+> # BAD: bash reads this as a pipe and breaks the command
+> --user-id auth0|605f3cfe4e52d60069bcb258
+> ```
+>
+> The same applies to any value containing `|`, `$`, `` ` ``, `&`, `;`, `(`, `)`, `<`, `>`, `*`, `?`, `#`, `!`, or whitespace — prefer single quotes by default for `--user-id`, `--secret-key`, and `--sql`.
+
 ### Self-hosted (production)
 
 [Deploy SQLFlow Docker](https://docs.gudusoft.com/docker/) in your VPC, grab your `userId` and `secretKey` from the SQLFlow web UI (e.g. `http://localhost:8165/`), then:
@@ -103,8 +118,6 @@ gsp-datahub-sidecar --mode self_hosted \
 ```
 
 You can also set this in `sidecar.yaml` (`sqlflow.url`) or via the `GSP_SQLFLOW_URL` environment variable.
-
-Omit `--user-id` / `--secret-key` only if your Docker image is configured with auth disabled.
 
 ## Configuration
 
