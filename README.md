@@ -165,7 +165,7 @@ Things to check:
 | Mode | Auth | Limit | Data location | Use case |
 |---|---|---|---|---|
 | `anonymous` (default) | None | 50/day per IP | SQL sent to api.gudusoft.com | Quick evaluation |
-| `authenticated` | Secret key | 500/day | SQL sent to api.gudusoft.com | Extended evaluation |
+| `authenticated` | Secret key | 10k/month | SQL sent to api.gudusoft.com | Extended evaluation |
 | `self_hosted` | Optional | Unlimited | SQL stays in your VPC | Production |
 
 ### Anonymous (default, zero setup)
@@ -176,7 +176,7 @@ gsp-datahub-sidecar --sql-file queries.sql --dry-run
 
 ### Authenticated (sign up for a free key)
 
-Get a key at [gudusoft.com/sqlflow/get-key](https://sqlflow.gudusoft.com/get-key), then:
+Get a key at [docs.gudusoft.com/sign-up](https://docs.gudusoft.com/sign-up/), then:
 
 ```bash
 gsp-datahub-sidecar --mode authenticated --secret-key sk-your-key-here --sql-file queries.sql

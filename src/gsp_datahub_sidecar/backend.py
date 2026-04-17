@@ -44,12 +44,12 @@ class RateLimitError(SQLFlowError):
 
     def __init__(self, response_body: dict):
         upgrade = response_body.get("upgrade", {})
-        personal_url = upgrade.get("personal_key", {}).get("url", "https://sqlflow.gudusoft.com/get-key")
+        personal_url = upgrade.get("personal_key", {}).get("url", "https://docs.gudusoft.com/sign-up/")
         docker_url = upgrade.get("self_hosted", {}).get("url", "https://sqlflow.gudusoft.com/docker")
         message = (
             f"Anonymous API rate limit exceeded. "
             f"To continue:\n"
-            f"  1. Get a free personal key (500/day): {personal_url}\n"
+            f"  1. Get a free personal key (10k/month): {personal_url}\n"
             f"  2. Deploy self-hosted (unlimited):    {docker_url}\n"
             f"  See sidecar.yaml.example for configuration."
         )
@@ -87,7 +87,7 @@ class AuthenticatedBackend(SQLFlowBackend):
         if resp.status_code == 401:
             raise SQLFlowError(
                 "Authentication failed. Check your secret_key in sidecar.yaml. "
-                "Get a key at https://sqlflow.gudusoft.com/get-key",
+                "Get a key at https://docs.gudusoft.com/sign-up/",
                 status_code=401,
             )
         resp.raise_for_status()

@@ -21,7 +21,7 @@ MOCK_429 = {
     "error": "rate_limit_exceeded",
     "message": "Anonymous API limit reached (50 calls/day).",
     "upgrade": {
-        "personal_key": {"url": "https://sqlflow.gudusoft.com/get-key"},
+        "personal_key": {"url": "https://docs.gudusoft.com/sign-up/"},
         "self_hosted": {"url": "https://sqlflow.gudusoft.com/docker"},
     },
 }
@@ -47,7 +47,7 @@ def test_anonymous_rate_limit():
         backend.get_lineage("SELECT 1", "dbvbigquery")
 
     assert "rate limit exceeded" in str(exc_info.value).lower()
-    assert "sqlflow.gudusoft.com/get-key" in str(exc_info.value)
+    assert "docs.gudusoft.com/sign-up" in str(exc_info.value)
     assert "sqlflow.gudusoft.com/docker" in str(exc_info.value)
 
 
