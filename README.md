@@ -72,7 +72,7 @@ gsp-datahub-sidecar --mode authenticated \
   --sql-file queries.sql
 ```
 
-The sidecar handles SQLFlow's token-exchange flow automatically (see the "How auth works" note under [Self-hosted](#self-hosted-production) — the same protocol applies).
+The sidecar handles SQLFlow's token-exchange flow automatically.
 
 ### Self-hosted (production)
 
@@ -80,18 +80,29 @@ The sidecar handles SQLFlow's token-exchange flow automatically (see the "How au
 
 ```bash
 gsp-datahub-sidecar --mode self_hosted \
-  --sqlflow-url http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson \
   --user-id YOUR_USER_ID \
   --secret-key YOUR_SECRET_KEY \
   --sql-file queries.sql
 ```
 
-**How auth works.** The sidecar implements SQLFlow Docker's two-step protocol automatically:
+`--sqlflow-url` is **optional** in self-hosted mode and defaults to:
 
-1. `POST /api/gspLive_backend/user/generateToken` with form-encoded `userId` + `secretKey` → returns a short-lived JWT `token`.
-2. `POST …/exportFullLineageAsJson` with form-encoded `userId` + `token` (never the `secretKey` itself).
+```
+http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson
+```
 
-The token is cached for the process lifetime and silently refreshed if the server returns `code: 401`. For reference, this matches SQLFlow's [GenerateToken.py](https://github.com/sqlparser/sqlflow_public/blob/master/api/python/basic/GenerateToken.py).
+Pass `--sqlflow-url` only when your SQLFlow Docker is **not** on `localhost:8165` — e.g. a remote host, a different port, or behind an nginx reverse proxy. Point it at the full `exportFullLineageAsJson` path:
+
+```bash
+# Remote host / non-default port
+gsp-datahub-sidecar --mode self_hosted \
+  --sqlflow-url http://sqlflow.internal:9100/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson \
+  --user-id YOUR_USER_ID \
+  --secret-key YOUR_SECRET_KEY \
+  --sql-file queries.sql
+```
+
+You can also set this in `sidecar.yaml` (`sqlflow.url`) or via the `GSP_SQLFLOW_URL` environment variable.
 
 Omit `--user-id` / `--secret-key` only if your Docker image is configured with auth disabled.
 
@@ -108,6 +119,7 @@ Copy `sidecar.yaml.example` to `sidecar.yaml` and edit. All settings can also be
 | `GSP_DB_VENDOR` | `sqlflow.db_vendor` | SQL dialect (default: `dbvbigquery`) |
 | `GSP_DATAHUB_SERVER` | `datahub.server` | DataHub GMS URL |
 | `GSP_DATAHUB_TOKEN` | `datahub.token` | DataHub auth token |
+| `GSP_COLUMN_LINEAGE` | `datahub.column_lineage` | Emit column-level lineage (default `true`) |
 
 ## Dry run vs. live mode
 
@@ -145,6 +157,22 @@ gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql
 | Extract lineage from response | Yes | Yes |
 | Build DataHub MCPs | Yes | Yes |
 | **Send MCPs to DataHub GMS** | **No** (logs what it would send) | **Yes** |
+
+### Table-level vs. column-level lineage
+
+By default, the sidecar emits **both** table-level upstream lineage and column-level (fine-grained) lineage — DataHub will show both table arrows and per-column arrows in the Lineage tab.
+
+To emit table-level lineage only (skip `fineGrainedLineages`):
+
+```bash
+gsp-datahub-sidecar --sql-file queries.sql --no-column-lineage
+```
+
+Equivalent config / env:
+- `datahub.column_lineage: false` in `sidecar.yaml`
+- `GSP_COLUMN_LINEAGE=false`
+
+`--dry-run` prints up to 5 column mappings per MCP so you can verify what would be sent.
 
 ## Verify lineage in DataHub
 
@@ -285,14 +313,19 @@ Newer sidecar versions do this automatically — upgrade if you still see `HTTP 
 pip install --upgrade git+https://github.com/gudusoftware/gsp-datahub-sidecar.git
 ```
 
-Then pass your SQLFlow Docker credentials (get them from the SQLFlow web UI at `http://<host>:8165/`):
+Then pass your SQLFlow Docker credentials (get them from the SQLFlow web UI at `http://<host>:8165/`). In self-hosted mode `--sqlflow-url` defaults to `http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson`, so you can omit it when SQLFlow is on localhost:
 
 ```bash
 gsp-datahub-sidecar --mode self_hosted \
-  --sqlflow-url http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson \
   --user-id YOUR_USER_ID \
   --secret-key YOUR_SECRET_KEY \
   --sql-file queries.sql
+```
+
+If SQLFlow is on a different host/port, add `--sqlflow-url` pointing at the full `exportFullLineageAsJson` path, e.g.:
+
+```bash
+--sqlflow-url http://sqlflow.internal:9100/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson
 ```
 
 You can verify the flow directly with `curl` first:

@@ -21,8 +21,13 @@ sqlflow:
   # Backend mode: anonymous | authenticated | self_hosted
   mode: anonymous
 
-  # Override the SQLFlow API URL (optional — each mode has a sensible default)
-  # url: https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage
+  # Override the SQLFlow API URL (optional — each mode has a sensible default).
+  # Defaults:
+  #   anonymous     -> https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage
+  #   authenticated -> https://api.gudusoft.com/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson
+  #   self_hosted   -> http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson
+  # Set only when your SQLFlow Docker is not on localhost:8165, e.g.:
+  # url: http://sqlflow.internal:9100/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson
 
   # For "authenticated" and "self_hosted" modes: your userId + secretKey.
   # Get them from https://docs.gudusoft.com/sign-up/ (cloud) or from the
@@ -51,6 +56,11 @@ datahub:
 
   # DataHub environment (PROD, DEV, STAGING)
   env: PROD
+
+  # Emit column-level (fine-grained) lineage alongside table-level.
+  # Set to false to emit table-only lineage (e.g. to A/B test against a
+  # table-only baseline). Default: true.
+  # column_lineage: true
 
 # ---------------------------------------------------------------------------
 # Log parsing

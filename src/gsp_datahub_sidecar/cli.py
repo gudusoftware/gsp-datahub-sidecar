@@ -107,6 +107,19 @@ def main():
         action="store_true",
         help="Parse and analyze SQL but don't emit to DataHub. Shows what would be sent.",
     )
+    column_lineage_group = parser.add_mutually_exclusive_group()
+    column_lineage_group.add_argument(
+        "--column-lineage",
+        action="store_true",
+        default=None,
+        help="Emit column-level (fine-grained) lineage alongside table-level (default).",
+    )
+    column_lineage_group.add_argument(
+        "--no-column-lineage",
+        action="store_false",
+        dest="column_lineage",
+        help="Emit table-level lineage only; skip fineGrainedLineages.",
+    )
     parser.add_argument(
         "--json",
         action="store_true",
@@ -146,6 +159,8 @@ def main():
         config.datahub.server = args.datahub_server
     if args.datahub_token:
         config.datahub.token = args.datahub_token
+    if args.column_lineage is not None:
+        config.datahub.column_lineage = args.column_lineage
     if args.log_file:
         config.log_parser.log_file = args.log_file
     if args.sql_file:
@@ -233,17 +248,28 @@ def main():
             errors += 1
 
     # --- Summary ---
+    total_column_mappings = sum(len(tl.column_mappings) for tl in all_lineages)
     logger.info("--- Summary ---")
     logger.info("Statements processed: %d", len(statements))
     logger.info("Errors: %d", errors)
-    logger.info("Table-level lineages found: %d", len(all_lineages))
+    logger.info("Table-level lineages found:      %d", len(all_lineages))
+    if config.datahub.column_lineage:
+        logger.info("Column-level mappings extracted: %d (wildcards filtered at emit time)",
+                    total_column_mappings)
+    else:
+        logger.info("Column-level lineage disabled (--no-column-lineage)")
 
     if not all_lineages:
         logger.info("No lineage to emit.")
         sys.exit(0 if errors == 0 else 1)
 
     # --- Build MCPs ---
-    mcps = build_mcps(all_lineages, config.datahub.platform, config.datahub.env)
+    mcps = build_mcps(
+        all_lineages,
+        config.datahub.platform,
+        config.datahub.env,
+        column_lineage=config.datahub.column_lineage,
+    )
 
     # --- Emit to DataHub ---
     emitted = emit_to_datahub(mcps, config.datahub, dry_run=args.dry_run)

@@ -48,11 +48,15 @@ def build_mcps(
     lineages: list[TableLineage],
     platform: str,
     env: str,
+    column_lineage: bool = True,
 ) -> list[MetadataChangeProposalWrapper]:
     """Convert TableLineage objects to DataHub MetadataChangeProposalWrappers.
 
     Groups all upstreams for the same downstream table into a single
     UpstreamLineage aspect (DataHub expects one aspect per entity).
+
+    When ``column_lineage`` is False, emits table-level upstreams only and
+    skips the ``fineGrainedLineages`` field.
     """
     # Group by downstream table
     downstream_map: dict[str, list[TableLineage]] = {}
@@ -61,6 +65,7 @@ def build_mcps(
         downstream_map.setdefault(key, []).append(tl)
 
     mcps = []
+    total_column_mappings = 0
 
     for downstream_table, tl_list in downstream_map.items():
         downstream_urn = _make_dataset_urn(downstream_table, platform, env)
@@ -76,7 +81,10 @@ def build_mcps(
                 type=DatasetLineageTypeClass.TRANSFORMED,
             ))
 
-            # Column-level lineage
+            if not column_lineage:
+                continue
+
+            # Column-level (fine-grained) lineage
             for src_col, tgt_col in tl.column_mappings:
                 # Skip wildcard columns
                 if src_col == "*" or tgt_col == "*":
@@ -102,10 +110,16 @@ def build_mcps(
             aspect=lineage_aspect,
         )
         mcps.append(mcp)
+        total_column_mappings += len(fine_grained)
         logger.debug("Built MCP for %s with %d upstreams, %d column mappings",
                       downstream_urn, len(upstreams), len(fine_grained))
 
-    logger.info("Built %d MCPs for %d downstream tables", len(mcps), len(downstream_map))
+    if column_lineage:
+        logger.info("Built %d MCPs for %d downstream tables (%d column-level mappings)",
+                    len(mcps), len(downstream_map), total_column_mappings)
+    else:
+        logger.info("Built %d MCPs for %d downstream tables (table-level only — column lineage disabled)",
+                    len(mcps), len(downstream_map))
     return mcps
 
 
@@ -121,7 +135,18 @@ def emit_to_datahub(
     if dry_run:
         logger.info("[DRY RUN] Would emit %d MCPs to %s", len(mcps), config.server)
         for mcp in mcps:
-            logger.info("[DRY RUN]   %s", mcp.entityUrn)
+            aspect = mcp.aspect
+            ups = len(aspect.upstreams) if aspect and aspect.upstreams else 0
+            fg = aspect.fineGrainedLineages or [] if aspect else []
+            logger.info("[DRY RUN]   %s  (%d upstream table(s), %d column-level lineage(s))",
+                        mcp.entityUrn, ups, len(fg))
+            # Show up to 5 column mappings for visual confirmation.
+            for fgl in fg[:5]:
+                up = fgl.upstreams[0] if fgl.upstreams else "?"
+                down = fgl.downstreams[0] if fgl.downstreams else "?"
+                logger.info("[DRY RUN]     %s -> %s", up, down)
+            if len(fg) > 5:
+                logger.info("[DRY RUN]     ... and %d more column mapping(s)", len(fg) - 5)
         return len(mcps)
 
     emitter = DatahubRestEmitter(

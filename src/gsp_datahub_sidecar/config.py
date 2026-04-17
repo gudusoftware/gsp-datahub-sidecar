@@ -41,6 +41,10 @@ class DataHubConfig:
     token: Optional[str] = None
     platform: str = "bigquery"
     env: str = "PROD"
+    # Emit column-level (fine-grained) lineage alongside table-level. Set to
+    # False to emit table-only lineage, e.g. to A/B test against a baseline
+    # or if your DataHub UI doesn't need column-level arrows.
+    column_lineage: bool = True
 
 
 @dataclass
@@ -85,6 +89,8 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
         cfg.datahub.token = dh.get("token", cfg.datahub.token)
         cfg.datahub.platform = dh.get("platform", cfg.datahub.platform)
         cfg.datahub.env = dh.get("env", cfg.datahub.env)
+        if "column_lineage" in dh:
+            cfg.datahub.column_lineage = bool(dh["column_lineage"])
 
         lp = raw.get("log_parser", {})
         cfg.log_parser.log_file = lp.get("log_file", cfg.log_parser.log_file)
@@ -103,6 +109,7 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
         "GSP_DATAHUB_TOKEN": ("datahub", "token"),
         "GSP_DATAHUB_PLATFORM": ("datahub", "platform"),
         "GSP_DATAHUB_ENV": ("datahub", "env"),
+        "GSP_COLUMN_LINEAGE": ("datahub", "column_lineage"),
         "GSP_LOG_FILE": ("log_parser", "log_file"),
         "GSP_SQL_FILE": ("log_parser", "sql_file"),
         "GSP_SQL_TEXT": ("log_parser", "sql_text"),
@@ -110,6 +117,11 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
     for env_var, (section, attr) in env_map.items():
         val = os.environ.get(env_var)
         if val is not None:
+            # Coerce to the field's declared type (bool, int) so YAML and env
+            # behave identically. Strings pass through unchanged.
+            current = getattr(getattr(cfg, section), attr, None)
+            if isinstance(current, bool):
+                val = val.strip().lower() in ("1", "true", "yes", "on")
             setattr(getattr(cfg, section), attr, val)
 
     # --- Validate ---
