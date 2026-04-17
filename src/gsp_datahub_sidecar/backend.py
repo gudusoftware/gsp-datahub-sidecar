@@ -45,7 +45,7 @@ class RateLimitError(SQLFlowError):
     def __init__(self, response_body: dict):
         upgrade = response_body.get("upgrade", {})
         personal_url = upgrade.get("personal_key", {}).get("url", "https://docs.gudusoft.com/sign-up/")
-        docker_url = upgrade.get("self_hosted", {}).get("url", "https://sqlflow.gudusoft.com/docker")
+        docker_url = upgrade.get("self_hosted", {}).get("url", "https://docs.gudusoft.com/docker/")
         message = (
             f"Anonymous API rate limit exceeded. "
             f"To continue:\n"

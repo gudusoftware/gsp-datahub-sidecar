@@ -184,7 +184,7 @@ gsp-datahub-sidecar --mode authenticated --secret-key sk-your-key-here --sql-fil
 
 ### Self-hosted (production)
 
-Deploy SQLFlow Docker in your VPC, then:
+[Deploy SQLFlow Docker](https://docs.gudusoft.com/docker/) in your VPC, then:
 
 ```bash
 gsp-datahub-sidecar --mode self_hosted \

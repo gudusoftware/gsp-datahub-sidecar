@@ -22,7 +22,7 @@ MOCK_429 = {
     "message": "Anonymous API limit reached (50 calls/day).",
     "upgrade": {
         "personal_key": {"url": "https://docs.gudusoft.com/sign-up/"},
-        "self_hosted": {"url": "https://sqlflow.gudusoft.com/docker"},
+        "self_hosted": {"url": "https://docs.gudusoft.com/docker/"},
     },
 }
 
@@ -48,7 +48,7 @@ def test_anonymous_rate_limit():
 
     assert "rate limit exceeded" in str(exc_info.value).lower()
     assert "docs.gudusoft.com/sign-up" in str(exc_info.value)
-    assert "sqlflow.gudusoft.com/docker" in str(exc_info.value)
+    assert "docs.gudusoft.com/docker/" in str(exc_info.value)
 
 
 @responses.activate
