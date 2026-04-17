@@ -79,8 +79,12 @@ def main():
         help="SQLFlow API URL (overrides config file).",
     )
     parser.add_argument(
+        "--user-id",
+        help="SQLFlow userId (required for self_hosted Docker when auth is enabled).",
+    )
+    parser.add_argument(
         "--secret-key",
-        help="SQLFlow secret key for authenticated mode (overrides config file).",
+        help="SQLFlow secret key for authenticated or self_hosted mode (overrides config file).",
     )
     parser.add_argument(
         "--db-vendor",
@@ -132,6 +136,8 @@ def main():
         config.sqlflow.mode = args.mode
     if args.sqlflow_url:
         config.sqlflow.url = args.sqlflow_url
+    if args.user_id:
+        config.sqlflow.user_id = args.user_id
     if args.secret_key:
         config.sqlflow.secret_key = args.secret_key
     if args.db_vendor:

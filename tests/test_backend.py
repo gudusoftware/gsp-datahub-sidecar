@@ -74,28 +74,140 @@ def test_authenticated_401():
         backend.get_lineage("SELECT 1", "dbvbigquery")
 
 
-@responses.activate
-def test_self_hosted_success():
-    url = "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
-    responses.add(responses.POST, url, json=MOCK_SUCCESS, status=200)
+SELF_HOSTED_LINEAGE_URL = (
+    "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
+)
+SELF_HOSTED_TOKEN_URL = "http://localhost:8165/api/gspLive_backend/user/generateToken"
 
-    backend = SelfHostedBackend(url=url)
-    result = backend.get_lineage("SELECT 1", "dbvbigquery")
-    assert result["code"] == 200
 
-    # No auth header when secret_key is None
-    assert "Authorization" not in responses.calls[0].request.headers
+def _body(call) -> str:
+    b = call.request.body
+    return b.decode() if isinstance(b, bytes) else (b or "")
 
 
 @responses.activate
-def test_self_hosted_with_key():
-    url = "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson"
-    responses.add(responses.POST, url, json=MOCK_SUCCESS, status=200)
+def test_self_hosted_no_credentials():
+    """Without credentials, no token fetch and no auth fields are sent."""
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
 
-    backend = SelfHostedBackend(url=url, secret_key="sk-local")
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL)
     result = backend.get_lineage("SELECT 1", "dbvbigquery")
     assert result["code"] == 200
-    assert responses.calls[0].request.headers["Authorization"] == "Bearer sk-local"
+
+    assert len(responses.calls) == 1
+    req = responses.calls[0].request
+    assert req.headers["Content-Type"].startswith("application/x-www-form-urlencoded")
+    body = _body(responses.calls[0])
+    assert "sqltext=SELECT+1" in body
+    assert "userId" not in body
+    assert "token" not in body
+
+
+@responses.activate
+def test_self_hosted_token_flow():
+    """With credentials, the backend calls generateToken then uses the returned token."""
+    responses.add(
+        responses.POST,
+        SELF_HOSTED_TOKEN_URL,
+        json={"code": "200", "userId": "real-user", "token": "jwt-abc"},
+        status=200,
+    )
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL, user_id="real-user", secret_key="sk-local")
+    result = backend.get_lineage("SELECT 1", "dbvbigquery")
+    assert result["code"] == 200
+
+    # 1. Token request uses userId + secretKey.
+    token_body = _body(responses.calls[0])
+    assert responses.calls[0].request.url.endswith("/user/generateToken")
+    assert "userId=real-user" in token_body
+    assert "secretKey=sk-local" in token_body
+
+    # 2. Lineage request uses userId + token (not secretKey).
+    lineage_body = _body(responses.calls[1])
+    assert "userId=real-user" in lineage_body
+    assert "token=jwt-abc" in lineage_body
+    assert "secretKey" not in lineage_body
+    assert "Authorization" not in responses.calls[1].request.headers
+
+
+@responses.activate
+def test_self_hosted_token_is_cached():
+    """Multiple get_lineage calls reuse the same token."""
+    responses.add(
+        responses.POST,
+        SELF_HOSTED_TOKEN_URL,
+        json={"code": "200", "userId": "real-user", "token": "jwt-abc"},
+        status=200,
+    )
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL, user_id="real-user", secret_key="sk-local")
+    backend.get_lineage("SELECT 1", "dbvbigquery")
+    backend.get_lineage("SELECT 2", "dbvbigquery")
+
+    token_calls = [c for c in responses.calls if c.request.url.endswith("/user/generateToken")]
+    assert len(token_calls) == 1
+
+
+@responses.activate
+def test_self_hosted_demo_user_skips_token_request():
+    """The gudu|0123456789 demo user accepts the literal string 'token'."""
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL, user_id="gudu|0123456789", secret_key="anything")
+    result = backend.get_lineage("SELECT 1", "dbvbigquery")
+    assert result["code"] == 200
+
+    assert len(responses.calls) == 1  # no generateToken round-trip
+    body = _body(responses.calls[0])
+    assert "userId=gudu%7C0123456789" in body
+    assert "token=token" in body
+
+
+@responses.activate
+def test_self_hosted_token_refresh_on_401():
+    """If the cached token is rejected, the backend fetches a new one and retries once."""
+    responses.add(
+        responses.POST,
+        SELF_HOSTED_TOKEN_URL,
+        json={"code": "200", "userId": "real-user", "token": "jwt-new"},
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        SELF_HOSTED_LINEAGE_URL,
+        json={"code": 401, "error": "Invalid user or token, access deny."},
+        status=200,
+    )
+    responses.add(responses.POST, SELF_HOSTED_LINEAGE_URL, json=MOCK_SUCCESS, status=200)
+
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL, user_id="real-user", secret_key="sk-local")
+    backend._token = "jwt-old"  # simulate cached stale token; skip initial generateToken call
+    result = backend.get_lineage("SELECT 1", "dbvbigquery")
+    assert result["code"] == 200
+
+    lineage_calls = [c for c in responses.calls if c.request.url.endswith("/exportFullLineageAsJson")]
+    assert len(lineage_calls) == 2
+    assert "token=jwt-old" in _body(lineage_calls[0])
+    assert "token=jwt-new" in _body(lineage_calls[1])
+
+
+@responses.activate
+def test_self_hosted_token_generation_failure():
+    """A failed generateToken surfaces a clear error."""
+    responses.add(
+        responses.POST,
+        SELF_HOSTED_TOKEN_URL,
+        json={"code": "401", "error": "Invalid user or token, access deny."},
+        status=200,
+    )
+
+    backend = SelfHostedBackend(url=SELF_HOSTED_LINEAGE_URL, user_id="real-user", secret_key="wrong")
+    with pytest.raises(SQLFlowError, match="token generation failed"):
+        backend.get_lineage("SELECT 1", "dbvbigquery")
 
 
 def test_create_backend_anonymous():

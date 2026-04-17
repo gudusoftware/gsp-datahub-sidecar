@@ -20,6 +20,7 @@ DEFAULT_URLS = {
 class SQLFlowConfig:
     mode: str = "anonymous"
     url: Optional[str] = None
+    user_id: Optional[str] = None
     secret_key: Optional[str] = None
     db_vendor: str = "dbvbigquery"
     show_relation_type: str = "fdd"
@@ -72,6 +73,7 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
         sf = raw.get("sqlflow", {})
         cfg.sqlflow.mode = sf.get("mode", cfg.sqlflow.mode)
         cfg.sqlflow.url = sf.get("url", cfg.sqlflow.url)
+        cfg.sqlflow.user_id = sf.get("user_id", cfg.sqlflow.user_id)
         cfg.sqlflow.secret_key = sf.get("secret_key", cfg.sqlflow.secret_key)
         cfg.sqlflow.db_vendor = sf.get("db_vendor", cfg.sqlflow.db_vendor)
         cfg.sqlflow.show_relation_type = sf.get("show_relation_type", cfg.sqlflow.show_relation_type)
@@ -91,6 +93,7 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
     env_map = {
         "GSP_BACKEND_MODE": ("sqlflow", "mode"),
         "GSP_SQLFLOW_URL": ("sqlflow", "url"),
+        "GSP_SQLFLOW_USER_ID": ("sqlflow", "user_id"),
         "GSP_SQLFLOW_SECRET_KEY": ("sqlflow", "secret_key"),
         "GSP_DB_VENDOR": ("sqlflow", "db_vendor"),
         "GSP_SHOW_RELATION_TYPE": ("sqlflow", "show_relation_type"),
