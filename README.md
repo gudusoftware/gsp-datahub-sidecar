@@ -111,6 +111,55 @@ curl -s "http://datahub-gms:8080/aspects/urn%3Ali%3Adataset%3A(urn%3Ali%3AdataPl
 
 If the lineage appears, the sidecar successfully recovered what sqlglot missed.
 
+## Fresh DataHub vs. existing DataHub
+
+### Fresh DataHub (no existing metadata)
+
+The sidecar works on a completely empty DataHub — DataHub auto-creates dataset entities when it receives lineage MCPs. You'll see the lineage graph immediately. However, the tables will appear as minimal shells:
+
+| | With BigQuery ingestion | Sidecar only (no prior metadata) |
+|---|---|---|
+| Lineage arrows in graph | Yes | Yes |
+| Column-level lineage | Yes | Yes |
+| Table/column names | Full display names | URN-derived names |
+| Column types & descriptions | Yes | No |
+| Table schema / field list | Yes | No |
+| Row counts / statistics | Yes | No |
+| Platform icon (BigQuery logo) | Yes | Yes |
+
+This is fine for a **demo or evaluation** — the lineage visualization proves that GSP recovers what sqlglot misses. The missing metadata would normally come from DataHub's BigQuery ingestion.
+
+### Existing DataHub (with metadata and sqlglot-generated lineage)
+
+This is the real production scenario. The sidecar **adds to** the lineage that DataHub's BigQuery ingestion already created — it does not replace or conflict with it.
+
+How it works:
+
+- DataHub's BigQuery ingestion runs first and creates lineage for all SQL that sqlglot **can** parse (standard SELECT, INSERT, CREATE VIEW, etc.)
+- The sidecar runs after and emits lineage only for the SQL that sqlglot **failed** on (procedural blocks with DECLARE, IF/THEN, CALL, etc.)
+- DataHub merges both into a single lineage graph per dataset
+
+The result is a **more complete** lineage graph — the existing lineage stays intact, and the sidecar fills in the gaps.
+
+**Important: URN matching**
+
+For the sidecar's lineage to connect with existing DataHub entities, the dataset URNs must match exactly. This means the table names in the sidecar output must match the names DataHub's BigQuery ingestion created.
+
+Things to check:
+
+1. **Case sensitivity**: DataHub's BigQuery ingestion lowercases URNs when `convert_urns_to_lowercase: true` is set in the ingestion config (which is common). The sidecar also lowercases by default, so this should match. If your DataHub uses mixed case, check that the URNs align.
+
+2. **Project/dataset prefix**: BigQuery tables are typically ingested as `project.dataset.table`. The sidecar uses the table names as they appear in the SQL. If your SQL uses backtick-quoted names like `` `project.dataset.table` ``, the sidecar strips the backticks and preserves the full path. Verify that the resulting URN matches what DataHub already has.
+
+3. **Platform and environment**: The sidecar defaults to `platform: bigquery` and `env: PROD`. If your DataHub uses different values (e.g. `env: DEV`), set them in `sidecar.yaml` or via `--datahub-platform` / `GSP_DATAHUB_ENV` to match.
+
+4. **Temp tables**: The sidecar emits lineage for temp tables (e.g. `temp_table`, `final_output`). If your DataHub's `dataset_pattern.deny` excludes temp tables (common in BigQuery ingestion configs), the temp table entities will be created by the sidecar but won't have schema metadata. This is expected — the lineage through them is still valuable.
+
+**The sidecar will NOT:**
+- Overwrite or delete existing lineage created by DataHub's ingestion
+- Modify any existing dataset metadata (schemas, descriptions, tags)
+- Interfere with DataHub's ingestion schedule or stateful ingestion
+
 ## Three backend modes
 
 | Mode | Auth | Limit | Data location | Use case |
