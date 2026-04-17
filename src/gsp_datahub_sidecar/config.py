@@ -12,7 +12,7 @@ import yaml
 DEFAULT_URLS = {
     "anonymous": "https://api.gudusoft.com/gspLive_backend/api/anonymous/lineage",
     "authenticated": "https://api.gudusoft.com/gspLive_backend/v1/sqlflow/sqlflow/exportFullLineageAsJson",
-    "self_hosted": "http://localhost:8165/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson",
+    "self_hosted": "http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson",
 }
 
 
