@@ -4,10 +4,16 @@ import logging
 
 from datahub.emitter.rest_emitter import DatahubRestEmitter
 from datahub.metadata.schema_classes import (
+    DatasetKeyClass,
     DatasetLineageTypeClass,
     FineGrainedLineageClass,
     FineGrainedLineageDownstreamTypeClass,
     FineGrainedLineageUpstreamTypeClass,
+    OtherSchemaClass,
+    SchemaFieldClass,
+    SchemaFieldDataTypeClass,
+    SchemaMetadataClass,
+    StringTypeClass,
     UpstreamClass,
     UpstreamLineageClass,
 )
@@ -66,14 +72,20 @@ def build_mcps(
 
     mcps = []
     total_column_mappings = 0
+    # Track all dataset URNs so we can ensure they exist in DataHub
+    all_dataset_urns: dict[str, str] = {}  # urn -> table_name
+    # Track columns per dataset URN for schema metadata
+    dataset_columns: dict[str, set[str]] = {}  # urn -> set of column names
 
     for downstream_table, tl_list in downstream_map.items():
         downstream_urn = _make_dataset_urn(downstream_table, platform, env)
+        all_dataset_urns[downstream_urn] = downstream_table
         upstreams = []
         fine_grained = []
 
         for tl in tl_list:
             upstream_urn = _make_dataset_urn(tl.upstream_table, platform, env)
+            all_dataset_urns[upstream_urn] = tl.upstream_table
 
             # Table-level upstream
             upstreams.append(UpstreamClass(
@@ -90,6 +102,12 @@ def build_mcps(
                 if src_col == "*" or tgt_col == "*":
                     continue
 
+                # Collect columns for schema metadata
+                src_col_clean = src_col.strip().lower().strip('"').strip("'").strip("`")
+                tgt_col_clean = tgt_col.strip().lower().strip('"').strip("'").strip("`")
+                dataset_columns.setdefault(upstream_urn, set()).add(src_col_clean)
+                dataset_columns.setdefault(downstream_urn, set()).add(tgt_col_clean)
+
                 upstream_field = _make_field_urn(upstream_urn, src_col)
                 downstream_field = _make_field_urn(downstream_urn, tgt_col)
 
@@ -98,6 +116,8 @@ def build_mcps(
                     downstreamType=FineGrainedLineageDownstreamTypeClass.FIELD,
                     upstreams=[upstream_field],
                     downstreams=[downstream_field],
+                    confidenceScore=1.0,
+                    transformOperation="IDENTITY",
                 ))
 
         lineage_aspect = UpstreamLineageClass(
@@ -114,12 +134,58 @@ def build_mcps(
         logger.debug("Built MCP for %s with %d upstreams, %d column mappings",
                       downstream_urn, len(upstreams), len(fine_grained))
 
+    # Emit datasetKey aspects for all referenced entities so DataHub
+    # creates them and the lineage graph renders upstream nodes.
+    env_fabric = env.upper()
+    key_mcps = []
+    for urn, table_name in all_dataset_urns.items():
+        name = table_name.strip().lower()
+        key_mcp = MetadataChangeProposalWrapper(
+            entityUrn=urn,
+            aspect=DatasetKeyClass(
+                platform=f"urn:li:dataPlatform:{platform}",
+                name=name,
+                origin=env_fabric,
+            ),
+        )
+        key_mcps.append(key_mcp)
+
+    # Emit schemaMetadata aspects so DataHub can render column-level lineage.
+    # Without schema fields registered, the UI won't draw column arrows.
+    schema_mcps = []
+    if column_lineage:
+        for urn, columns in dataset_columns.items():
+            table_name = all_dataset_urns.get(urn, "unknown")
+            fields = [
+                SchemaFieldClass(
+                    fieldPath=col,
+                    type=SchemaFieldDataTypeClass(type=StringTypeClass()),
+                    nativeDataType="string",
+                )
+                for col in sorted(columns)
+            ]
+            schema_mcp = MetadataChangeProposalWrapper(
+                entityUrn=urn,
+                aspect=SchemaMetadataClass(
+                    schemaName=table_name.strip().lower(),
+                    platform=f"urn:li:dataPlatform:{platform}",
+                    version=0,
+                    hash="",
+                    platformSchema=OtherSchemaClass(rawSchema=""),
+                    fields=fields,
+                ),
+            )
+            schema_mcps.append(schema_mcp)
+
+    # Order: entity keys first, then schemas, then lineage
+    mcps = key_mcps + schema_mcps + mcps
+
     if column_lineage:
         logger.info("Built %d MCPs for %d downstream tables (%d column-level mappings)",
-                    len(mcps), len(downstream_map), total_column_mappings)
+                    len(mcps) - len(key_mcps), len(downstream_map), total_column_mappings)
     else:
         logger.info("Built %d MCPs for %d downstream tables (table-level only — column lineage disabled)",
-                    len(mcps), len(downstream_map))
+                    len(mcps) - len(key_mcps), len(downstream_map))
     return mcps
 
 
