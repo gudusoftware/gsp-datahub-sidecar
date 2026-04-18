@@ -101,6 +101,81 @@ def test_no_persistent_effects():
     assert lineages == []
 
 
+def test_resolves_through_function_nodes():
+    """Function nodes (ARRAY_AGG, etc.) should be treated as intermediates.
+
+    Reproduces the pattern from DataHub #11670: BigQuery deduplication macro
+    using ARRAY_AGG(...)[OFFSET(0)]. The lineage chain is:
+      ALL_ARTICLES.ORIGINAL -> ARRAY_AGG.ARRAY_AGG -> RS-1.UNIQUE
+        -> RS-2.UNIQUE -> DEDUPLICATED_ARTICLES.UNIQUE
+    The mapper must resolve through both RS-* and ARRAY_AGG to reach ALL_ARTICLES.
+    """
+    response = {
+        "data": {
+            "sqlflow": {
+                "dbobjs": {
+                    "servers": [{
+                        "name": "DEFAULT_SERVER",
+                        "dbVendor": "dbvbigquery",
+                        "databases": [{
+                            "name": "DEFAULT",
+                            "schemas": [{
+                                "name": "DEFAULT",
+                                "tables": [{
+                                    "id": "11", "name": "all_articles", "type": "table",
+                                    "columns": [
+                                        {"id": "12", "name": "original"},
+                                        {"id": "13", "name": "id"},
+                                    ],
+                                }],
+                                "others": [
+                                    {"id": "7", "name": "RS-1", "type": "select_list"},
+                                    {"id": "19", "name": "RS-2", "type": "select_list"},
+                                    {"id": "16", "name": "array_agg", "type": "function"},
+                                ],
+                            }],
+                        }],
+                    }],
+                },
+                "relationships": [
+                    # ALL_ARTICLES.ORIGINAL -> ARRAY_AGG (function)
+                    {
+                        "id": "2", "type": "fdd", "effectType": "function",
+                        "target": {"parentName": "ARRAY_AGG", "column": "ARRAY_AGG"},
+                        "sources": [{"parentName": "ALL_ARTICLES", "column": "ORIGINAL"}],
+                    },
+                    # ARRAY_AGG -> RS-1.UNIQUE (select)
+                    {
+                        "id": "1", "type": "fdd", "effectType": "select",
+                        "target": {"parentName": "RS-1", "column": "UNIQUE"},
+                        "sources": [{"parentName": "ARRAY_AGG", "column": "ARRAY_AGG"}],
+                    },
+                    # RS-1.UNIQUE -> RS-2.UNIQUE (select — outer query)
+                    {
+                        "id": "4_0", "type": "fdd", "effectType": "select",
+                        "target": {"parentName": "RS-2", "column": "UNIQUE"},
+                        "sources": [{"parentName": "RS-1", "column": "UNIQUE"}],
+                    },
+                    # RS-2.UNIQUE -> DEDUPLICATED_ARTICLES.UNIQUE (create_table)
+                    {
+                        "id": "5_0", "type": "fdd", "effectType": "create_table",
+                        "target": {"parentName": "DEDUPLICATED_ARTICLES", "column": "UNIQUE"},
+                        "sources": [{"parentName": "RS-2", "column": "UNIQUE"}],
+                        "processId": "5",
+                    },
+                ],
+            }
+        }
+    }
+    lineages = extract_lineage(response)
+    assert len(lineages) == 1
+
+    tl = lineages[0]
+    assert tl.upstream_table == "ALL_ARTICLES"
+    assert tl.downstream_table == "DEDUPLICATED_ARTICLES"
+    assert ("ORIGINAL", "UNIQUE") in tl.column_mappings
+
+
 def test_skips_self_references():
     response = {
         "data": {

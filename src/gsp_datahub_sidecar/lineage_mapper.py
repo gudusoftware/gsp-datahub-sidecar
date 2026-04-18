@@ -32,10 +32,39 @@ class TableLineage:
     # (source_column, target_column) pairs
 
 
-def _is_intermediate(name: str) -> bool:
-    """Check if a name refers to an intermediate result set rather than a real table."""
+def _is_intermediate(name: str, function_names: set[str] | None = None) -> bool:
+    """Check if a name refers to an intermediate result set rather than a real table.
+
+    Intermediate means: RS-*/RESULT_OF_* result sets, or function nodes
+    (e.g. ARRAY_AGG, COUNT) that appear as parents in the relationship chain
+    but are not real tables.
+    """
     upper = name.upper()
-    return any(upper.startswith(p) for p in INTERMEDIATE_PREFIXES)
+    if any(upper.startswith(p) for p in INTERMEDIATE_PREFIXES):
+        return True
+    if function_names and upper in function_names:
+        return True
+    return False
+
+
+def _extract_function_names(sqlflow_response: dict) -> set[str]:
+    """Extract names of function nodes from SQLFlow dbobjs.
+
+    SQLFlow represents aggregate/scalar functions (ARRAY_AGG, COUNT, etc.)
+    as 'others' entries with type='function'. These are intermediate nodes
+    in the lineage chain and should be resolved through, not treated as tables.
+    """
+    names: set[str] = set()
+    dbobjs = _find_key(sqlflow_response, "dbobjs")
+    if not dbobjs:
+        return names
+    for server in dbobjs.get("servers", []):
+        for db in server.get("databases", []):
+            for schema in db.get("schemas", []):
+                for other in schema.get("others", []):
+                    if other.get("type") == "function":
+                        names.add(other["name"].upper())
+    return names
 
 
 def _find_key(obj, key: str):
@@ -65,6 +94,11 @@ def extract_lineage(sqlflow_response: dict) -> list[TableLineage]:
         logger.warning("No 'relationships' found in SQLFlow response")
         return []
 
+    # Identify function nodes so they are resolved through, not treated as tables
+    function_names = _extract_function_names(sqlflow_response)
+    if function_names:
+        logger.debug("Function nodes (treated as intermediates): %s", function_names)
+
     # Phase 1: collect all fdd relationships
     all_rels = [r for r in relationships if r.get("type") == "fdd"]
     logger.debug("Total fdd relationships: %d", len(all_rels))
@@ -89,7 +123,7 @@ def extract_lineage(sqlflow_response: dict) -> list[TableLineage]:
             return []  # cycle protection
         visited.add(key)
 
-        if not _is_intermediate(parent_name):
+        if not _is_intermediate(parent_name, function_names):
             return [(parent_name, column)]
 
         # It's an intermediate — look up what feeds into it
@@ -115,7 +149,7 @@ def extract_lineage(sqlflow_response: dict) -> list[TableLineage]:
         target_table = target["parentName"]
         target_column = target["column"]
 
-        if _is_intermediate(target_table):
+        if _is_intermediate(target_table, function_names):
             continue  # target should be a real table
 
         for src in rel.get("sources", []):
@@ -126,7 +160,7 @@ def extract_lineage(sqlflow_response: dict) -> list[TableLineage]:
             real_sources = resolve_sources(src_parent, src_column)
 
             for real_table, real_column in real_sources:
-                if _is_intermediate(real_table):
+                if _is_intermediate(real_table, function_names):
                     continue
                 if real_table == target_table:
                     continue  # skip self-references
