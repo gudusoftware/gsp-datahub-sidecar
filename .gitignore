@@ -12,6 +12,7 @@ venv/
 
 # Config with secrets
 sidecar.yaml
+.env
 
 # IDE
 .idea/
