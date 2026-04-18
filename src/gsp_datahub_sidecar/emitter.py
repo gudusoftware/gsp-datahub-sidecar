@@ -202,17 +202,25 @@ def emit_to_datahub(
         logger.info("[DRY RUN] Would emit %d MCPs to %s", len(mcps), config.server)
         for mcp in mcps:
             aspect = mcp.aspect
-            ups = len(aspect.upstreams) if aspect and aspect.upstreams else 0
-            fg = aspect.fineGrainedLineages or [] if aspect else []
-            logger.info("[DRY RUN]   %s  (%d upstream table(s), %d column-level lineage(s))",
-                        mcp.entityUrn, ups, len(fg))
-            # Show up to 5 column mappings for visual confirmation.
-            for fgl in fg[:5]:
-                up = fgl.upstreams[0] if fgl.upstreams else "?"
-                down = fgl.downstreams[0] if fgl.downstreams else "?"
-                logger.info("[DRY RUN]     %s -> %s", up, down)
-            if len(fg) > 5:
-                logger.info("[DRY RUN]     ... and %d more column mapping(s)", len(fg) - 5)
+            aspect_name = type(aspect).__name__ if aspect else "None"
+
+            if isinstance(aspect, UpstreamLineageClass):
+                ups = len(aspect.upstreams) if aspect.upstreams else 0
+                fg = aspect.fineGrainedLineages or []
+                logger.info("[DRY RUN]   %s  [%s] (%d upstream table(s), %d column-level lineage(s))",
+                            mcp.entityUrn, aspect_name, ups, len(fg))
+                for fgl in fg[:5]:
+                    up = fgl.upstreams[0] if fgl.upstreams else "?"
+                    down = fgl.downstreams[0] if fgl.downstreams else "?"
+                    logger.info("[DRY RUN]     %s -> %s", up, down)
+                if len(fg) > 5:
+                    logger.info("[DRY RUN]     ... and %d more column mapping(s)", len(fg) - 5)
+            elif isinstance(aspect, SchemaMetadataClass):
+                n_fields = len(aspect.fields) if aspect.fields else 0
+                logger.info("[DRY RUN]   %s  [%s] (%d field(s))",
+                            mcp.entityUrn, aspect_name, n_fields)
+            else:
+                logger.info("[DRY RUN]   %s  [%s]", mcp.entityUrn, aspect_name)
         return len(mcps)
 
     emitter = DatahubRestEmitter(
