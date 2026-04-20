@@ -119,7 +119,7 @@ def test_final_output_column_lineage(lineages):
         tl for tl in lineages
         if tl.downstream_table.upper() == "FINAL_OUTPUT"
     )
-    mappings = {(s.upper(), t.upper()) for s, t in final.column_mappings if s != "*" and t != "*"}
+    mappings = {(s.upper(), t.upper()) for s, t in final.column_mappings}
 
     expected = {
         ("IDFIELD", "IDFIELD"),
@@ -128,29 +128,31 @@ def test_final_output_column_lineage(lineages):
         ("EVENTTIMESTAMP", "EVENTTIMESTAMP"),
         ("BUSINESSDATE", "BUSINESSDATE"),
     }
-    assert mappings == expected, (
+    # Wildcards (* -> *) may also be present — verify named columns are a subset
+    named_mappings = {(s, t) for s, t in mappings if s != "*" and t != "*"}
+    assert named_mappings == expected, (
         f"final_output column mappings differ.\n"
-        f"  missing: {expected - mappings}\n"
-        f"  extra:   {mappings - expected}"
+        f"  missing: {expected - named_mappings}\n"
+        f"  extra:   {named_mappings - expected}"
     )
 
 
 def test_temp_table_column_lineage(lineages):
-    """view_name -> temp_table has exactly 6 named column mappings.
+    """view_name -> temp_table has exactly 6 named column mappings plus wildcards.
 
     The SQL is ``SELECT * EXCEPT (SnapshotTimestamp) FROM view_name``. SQLFlow
-    expands ``*`` into per-column fdd relationships; those named edges (after
-    filtering the raw ``*`` wildcards produced alongside them) cover:
+    expands ``*`` into per-column fdd relationships; those named edges cover:
       - the 4 columns in the WHERE/ORDER BY clauses
       - SnapshotTimestamp (even though EXCEPT'd at execution, the parser
         still tracks the column-to-column relationship)
-    for a total of 6 non-wildcard mappings.
+    for a total of 6 non-wildcard mappings. Wildcard mappings (* -> *) are
+    also preserved and emitted.
     """
     temp = next(
         tl for tl in lineages
         if tl.downstream_table.upper() == "TEMP_TABLE"
     )
-    mappings = {(s.upper(), t.upper()) for s, t in temp.column_mappings if s != "*" and t != "*"}
+    named_mappings = {(s.upper(), t.upper()) for s, t in temp.column_mappings if s != "*" and t != "*"}
 
     expected = {
         ("IDFIELD", "IDFIELD"),
@@ -160,10 +162,10 @@ def test_temp_table_column_lineage(lineages):
         ("EVENTTIMESTAMP", "EVENTTIMESTAMP"),
         ("SNAPSHOTTIMESTAMP", "SNAPSHOTTIMESTAMP"),
     }
-    assert mappings == expected, (
+    assert named_mappings == expected, (
         f"temp_table column mappings differ.\n"
-        f"  missing: {expected - mappings}\n"
-        f"  extra:   {mappings - expected}"
+        f"  missing: {expected - named_mappings}\n"
+        f"  extra:   {named_mappings - expected}"
     )
 
 
@@ -195,15 +197,18 @@ def test_dry_run_emits_expected_mcps(lineages, caplog):
     assert aspect_names.count("SchemaMetadataClass") == 4
     assert aspect_names.count("UpstreamLineageClass") == 2
 
-    # Total fine-grained column lineages after wildcard filtering:
-    # 6 (view_name -> temp_table) + 5 (temp_table_delta -> final_output) = 11
+    # Total fine-grained column lineages INCLUDING wildcards:
+    # Wildcards are now preserved in emission (not filtered).
+    # The exact count depends on how many * -> * mappings SQLFlow produces;
+    # verify at least the 11 named mappings (6 + 5) are present.
     total_fine_grained = sum(
         len(m.aspect.fineGrainedLineages or [])
         for m in mcps
         if type(m.aspect).__name__ == "UpstreamLineageClass"
     )
-    assert total_fine_grained == 11, (
-        f"expected 11 fine-grained column lineages (6 + 5), got {total_fine_grained}"
+    assert total_fine_grained >= 11, (
+        f"expected at least 11 fine-grained column lineages (6 named + 5 named + wildcards), "
+        f"got {total_fine_grained}"
     )
 
     with caplog.at_level(logging.INFO, logger="gsp_datahub_sidecar.emitter"):

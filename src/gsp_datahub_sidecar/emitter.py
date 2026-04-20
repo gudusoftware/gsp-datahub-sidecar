@@ -98,15 +98,14 @@ def build_mcps(
 
             # Column-level (fine-grained) lineage
             for src_col, tgt_col in tl.column_mappings:
-                # Skip wildcard columns
-                if src_col == "*" or tgt_col == "*":
-                    continue
-
-                # Collect columns for schema metadata
+                # Collect columns for schema metadata (skip wildcards —
+                # "*" is not a real column name for schema registration)
                 src_col_clean = src_col.strip().lower().strip('"').strip("'").strip("`")
                 tgt_col_clean = tgt_col.strip().lower().strip('"').strip("'").strip("`")
-                dataset_columns.setdefault(upstream_urn, set()).add(src_col_clean)
-                dataset_columns.setdefault(downstream_urn, set()).add(tgt_col_clean)
+                if src_col_clean != "*":
+                    dataset_columns.setdefault(upstream_urn, set()).add(src_col_clean)
+                if tgt_col_clean != "*":
+                    dataset_columns.setdefault(downstream_urn, set()).add(tgt_col_clean)
 
                 upstream_field = _make_field_urn(upstream_urn, src_col)
                 downstream_field = _make_field_urn(downstream_urn, tgt_col)

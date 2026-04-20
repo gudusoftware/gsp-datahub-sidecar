@@ -1,18 +1,24 @@
 # gsp-datahub-sidecar
 
-Recover BigQuery procedural-SQL lineage that DataHub's sqlglot parser misses, using [Gudu SQLFlow](https://sqlflow.gudusoft.com).
+Recover SQL lineage that DataHub's sqlglot parser misses — across BigQuery, MSSQL, Snowflake, Oracle, and [20+ dialects](https://www.gudusoft.com/sql-dialects/) — using [Gudu SQLFlow](https://sqlflow.gudusoft.com).
 
 ## The problem
 
-DataHub's BigQuery ingestion uses sqlglot for SQL lineage extraction. sqlglot cannot parse **GoogleSQL Procedural Language** (`DECLARE`, `IF/THEN`, `CALL`, `CREATE TEMP TABLE` inside procedural blocks), causing lineage to silently break. See [datahub-project/datahub#11654](https://github.com/datahub-project/datahub/issues/11654).
+DataHub uses sqlglot for SQL lineage extraction. sqlglot silently loses lineage on:
+
+- **BigQuery** procedural SQL — `DECLARE`, `IF/THEN`, `CALL`, `CREATE TEMP TABLE` ([#11654](https://github.com/datahub-project/datahub/issues/11654))
+- **BigQuery** dbt deduplication macros — `array_agg()[offset(0)]` with struct unpacking ([#11670](https://github.com/datahub-project/datahub/issues/11670))
+- **MSSQL** stored procedures — `CASE...END` breaks `split_statements` ([#12606](https://github.com/datahub-project/datahub/issues/12606))
+- **MSSQL** identifier casing — lowercased URNs break lineage links ([#13792](https://github.com/datahub-project/datahub/issues/13792), [#11322](https://github.com/datahub-project/datahub/issues/11322))
+- **Power BI** queries — `--` comments silently drop JOINs from lineage ([#11251](https://github.com/datahub-project/datahub/issues/11251))
 
 ## The solution
 
-This sidecar runs alongside your existing DataHub ingestion. It re-parses the SQL statements that sqlglot failed on using Gudu SQLFlow (which handles procedural SQL natively), then emits the recovered lineage to DataHub via the REST API.
+This sidecar runs alongside your existing DataHub ingestion. It re-parses the SQL statements that sqlglot failed on using Gudu SQLFlow (which handles procedural SQL and dialect-specific syntax natively), then emits the recovered lineage to DataHub via the REST API.
 
 ```
 DataHub ingestion (unchanged)          gsp-datahub-sidecar (this tool)
-  BQ audit log -> sqlglot -> lineage      |
+  audit log -> sqlglot -> lineage         |
                     |                     |  re-parse failed SQL with SQLFlow
                     v                     |  emit recovered lineage via REST
               "Command fallback"          v
@@ -32,10 +38,22 @@ If you hit `error: externally-managed-environment` on Ubuntu 23.04+ / Debian 12+
 Sample SQL files are included in the `examples/` directory — try them immediately after install:
 
 ```bash
-# Try the BigQuery procedural SQL from DataHub Issue #11654:
+# BigQuery procedural SQL (DataHub Issue #11654):
 gsp-datahub-sidecar --sql-file examples/bigquery_procedural.sql --dry-run
 
-# Try an Oracle CREATE VIEW with subqueries:
+# BigQuery dbt deduplication macro (DataHub Issue #11670):
+gsp-datahub-sidecar --sql-file examples/bigquery_dbt_dedup.sql --dry-run
+
+# MSSQL stored procedure with CASE...END (DataHub Issue #12606):
+gsp-datahub-sidecar --sql-file examples/mssql_stored_procedure.sql --db-vendor dbvmssql --dry-run
+
+# MSSQL view with mixed-case identifiers (DataHub Issues #13792, #11322):
+gsp-datahub-sidecar --sql-file examples/mssql_case_sensitivity.sql --db-vendor dbvmssql --dry-run
+
+# Power BI query with comments (DataHub Issue #11251):
+gsp-datahub-sidecar --sql-file examples/powerbi_comments.sql --db-vendor dbvmssql --dry-run
+
+# Oracle CREATE VIEW with subqueries:
 gsp-datahub-sidecar --sql-file examples/oracle_create_view.sql --db-vendor dbvoracle --dry-run
 
 # Analyze inline SQL:
@@ -248,7 +266,7 @@ If the lineage appears, the sidecar successfully recovered what sqlglot missed.
 
 The sidecar works on a completely empty DataHub — DataHub auto-creates dataset entities when it receives lineage MCPs. You'll see the lineage graph immediately. However, the tables will appear as minimal shells:
 
-| | With BigQuery ingestion | Sidecar only (no prior metadata) |
+| | With platform ingestion | Sidecar only (no prior metadata) |
 |---|---|---|
 | Lineage arrows in graph | Yes | Yes |
 | Column-level lineage | Yes | Yes |
@@ -256,18 +274,18 @@ The sidecar works on a completely empty DataHub — DataHub auto-creates dataset
 | Column types & descriptions | Yes | No |
 | Table schema / field list | Yes | No |
 | Row counts / statistics | Yes | No |
-| Platform icon (BigQuery logo) | Yes | Yes |
+| Platform icon | Yes | Yes |
 
-This is fine for a **demo or evaluation** — the lineage visualization proves that GSP recovers what sqlglot misses. The missing metadata would normally come from DataHub's BigQuery ingestion.
+This is fine for a **demo or evaluation** — the lineage visualization proves that GSP recovers what sqlglot misses. The missing metadata would normally come from DataHub's platform ingestion (BigQuery, MSSQL, etc.).
 
 ### Existing DataHub (with metadata and sqlglot-generated lineage)
 
-This is the real production scenario. The sidecar **adds to** the lineage that DataHub's BigQuery ingestion already created — it does not replace or conflict with it.
+This is the real production scenario. The sidecar **adds to** the lineage that DataHub's platform ingestion already created — it does not replace or conflict with it.
 
 How it works:
 
-- DataHub's BigQuery ingestion runs first and creates lineage for all SQL that sqlglot **can** parse (standard SELECT, INSERT, CREATE VIEW, etc.)
-- The sidecar runs after and emits lineage only for the SQL that sqlglot **failed** on (procedural blocks with DECLARE, IF/THEN, CALL, etc.)
+- DataHub's platform ingestion runs first and creates lineage for all SQL that sqlglot **can** parse (standard SELECT, INSERT, CREATE VIEW, etc.)
+- The sidecar runs after and emits lineage only for the SQL that sqlglot **failed** on (procedural blocks, dialect-specific syntax, complex expressions, etc.)
 - DataHub merges both into a single lineage graph per dataset
 
 The result is a **more complete** lineage graph — the existing lineage stays intact, and the sidecar fills in the gaps.
@@ -278,11 +296,11 @@ For the sidecar's lineage to connect with existing DataHub entities, the dataset
 
 Things to check:
 
-1. **Case sensitivity**: DataHub's BigQuery ingestion lowercases URNs when `convert_urns_to_lowercase: true` is set in the ingestion config (which is common). The sidecar also lowercases by default, so this should match. If your DataHub uses mixed case, check that the URNs align.
+1. **Case sensitivity**: DataHub ingestion often lowercases URNs when `convert_urns_to_lowercase: true` is set (common for BigQuery). The sidecar also lowercases by default, so this should match. For MSSQL, where identifier casing matters (see [#13792](https://github.com/datahub-project/datahub/issues/13792)), verify that the sidecar's output casing aligns with your DataHub URNs.
 
-2. **Project/dataset prefix**: BigQuery tables are typically ingested as `project.dataset.table`. The sidecar uses the table names as they appear in the SQL. If your SQL uses backtick-quoted names like `` `project.dataset.table` ``, the sidecar strips the backticks and preserves the full path. Verify that the resulting URN matches what DataHub already has.
+2. **Schema-qualified names**: Tables are typically ingested as `database.schema.table` (MSSQL) or `project.dataset.table` (BigQuery). The sidecar uses the table names as they appear in the SQL. If your SQL uses bracket-quoted names like `[schema].[table]` or backtick-quoted names like `` `project.dataset.table` ``, the sidecar strips the quotes and preserves the full path. Verify that the resulting URN matches what DataHub already has.
 
-3. **Platform and environment**: The sidecar defaults to `platform: bigquery` and `env: PROD`. If your DataHub uses different values (e.g. `env: DEV`), set them in `sidecar.yaml` or via `--datahub-platform` / `GSP_DATAHUB_ENV` to match.
+3. **Platform and environment**: The sidecar defaults to `platform: bigquery` and `env: PROD`. Set `--datahub-platform mssql` (or `snowflake`, `oracle`, etc.) and `--datahub-env` in `sidecar.yaml` or via environment variables to match your DataHub setup.
 
 4. **Temp tables**: The sidecar emits lineage for temp tables (e.g. `temp_table`, `final_output`). If your DataHub's `dataset_pattern.deny` excludes temp tables (common in BigQuery ingestion configs), the temp table entities will be created by the sidecar but won't have schema metadata. This is expected — the lineage through them is still valuable.
 

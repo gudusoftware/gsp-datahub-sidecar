@@ -22,6 +22,35 @@ PARSE_FAILURE_PATTERN = re.compile(
 )
 
 
+# Power BI M-language escape sequences that must be decoded before SQL parsing.
+# M encodes newlines as #(lf), carriage returns as #(cr), and tabs as #(tab).
+# Without decoding, -- comments swallow the rest of the query because #(lf) is
+# not a real newline.  See https://github.com/datahub-project/datahub/issues/11251
+_M_LANGUAGE_ESCAPES = {
+    "#(lf)": "\n",
+    "#(cr)": "\r",
+    "#(cr,lf)": "\r\n",
+    "#(tab)": "\t",
+}
+
+_M_ESCAPE_PATTERN = re.compile(
+    r"#\((?:lf|cr|cr,lf|tab)\)", re.IGNORECASE
+)
+
+
+def normalize_sql(sql: str) -> str:
+    """Decode Power BI M-language escape sequences in SQL text.
+
+    Replaces #(lf), #(cr), #(cr,lf), and #(tab) with their real characters
+    so that SQL parsers can correctly handle single-line comments (--).
+    """
+    if "#(" not in sql:
+        return sql
+    return _M_ESCAPE_PATTERN.sub(
+        lambda m: _M_LANGUAGE_ESCAPES[m.group(0).lower()], sql
+    )
+
+
 @dataclass
 class FailedStatement:
     """A SQL statement that sqlglot failed to parse."""
@@ -44,7 +73,7 @@ def parse_log_file(log_path: str) -> list[FailedStatement]:
     statements = []
 
     for match in COMMAND_FALLBACK_PATTERN.finditer(content):
-        sql_fragment = match.group(1).strip()
+        sql_fragment = normalize_sql(match.group(1).strip())
         if sql_fragment:
             statements.append(FailedStatement(
                 sql=sql_fragment,
@@ -53,7 +82,7 @@ def parse_log_file(log_path: str) -> list[FailedStatement]:
             ))
 
     for match in PARSE_FAILURE_PATTERN.finditer(content):
-        sql_fragment = match.group(1).strip()
+        sql_fragment = normalize_sql(match.group(1).strip())
         if sql_fragment:
             statements.append(FailedStatement(
                 sql=sql_fragment,
@@ -94,6 +123,8 @@ def parse_sql_file(sql_path: str) -> list[FailedStatement]:
 
     content = path.read_text(encoding="utf-8")
 
+    content = normalize_sql(content)
+
     # Procedural SQL: send as one block (semicolons are inside the block)
     if _PROCEDURAL_KEYWORDS.search(content):
         logger.info("Detected procedural SQL in %s — sending as single statement", sql_path)
@@ -122,7 +153,7 @@ def parse_sql_file(sql_path: str) -> list[FailedStatement]:
 def parse_sql_text(sql_text: str) -> list[FailedStatement]:
     """Wrap a direct SQL string as a FailedStatement."""
     return [FailedStatement(
-        sql=sql_text.strip(),
+        sql=normalize_sql(sql_text.strip()),
         source="cli input",
         error="direct input",
     )]

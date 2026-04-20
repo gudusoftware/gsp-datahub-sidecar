@@ -42,6 +42,7 @@ sqlflow:
   # secret_key: your-secret-key
 
   # Default SQL dialect for lineage analysis
+  # Common values: dbvbigquery, dbvmssql, dbvoracle, dbvsnowflake, dbvredshift
   db_vendor: dbvbigquery
 
   # Relation types to request (comma-separated: fdd, fdr, join, call, er)
