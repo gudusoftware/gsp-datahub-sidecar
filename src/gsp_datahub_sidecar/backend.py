@@ -1,6 +1,11 @@
-"""SQLFlow backend — calls the lineage API in anonymous, authenticated, or self-hosted mode."""
+"""SQLFlow backend — calls the lineage API in anonymous, authenticated, self-hosted, or local-JAR mode."""
 
+import json
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -206,8 +211,125 @@ class SelfHostedBackend(TokenExchangeBackend):
     label = "Self-hosted SQLFlow"
 
 
+# SQLFlow's internal enum names (``dbvbigquery``) vs. the CLI's short aliases
+# (``bigquery``). ``DataFlowAnalyzer /t <name>`` calls ``EDbVendor.fromAlias``,
+# which only matches the short form — passing ``dbvbigquery`` silently falls
+# back to ``dbvoracle`` and every non-Oracle statement becomes a syntax error.
+# Strip the ``dbv`` prefix when present.
+def _cli_vendor_name(db_vendor: str) -> str:
+    name = (db_vendor or "").strip().lower()
+    if name.startswith("dbv"):
+        name = name[3:]
+    return name or "generic"
+
+
+class LocalJarBackend(SQLFlowBackend):
+    """Tier 4: Embedded gsp.jar. No HTTP, no Docker — SQL never leaves the process.
+
+    Shells out to SQLFlow's bundled CLI entry point::
+
+        java -cp <jar> gudusoft.gsqlparser.dlineage.DataFlowAnalyzer \\
+             /f <sql-file> /t <vendor> /json
+
+    The CLI prints the raw ``Dataflow`` JSON (``{dbobjs, relationships,
+    processes, errors?}``). We wrap it as ``{"code": 200, "data": ...}`` so
+    the downstream mapper and the ``code == 200`` check in ``cli.py`` remain
+    identical to the HTTP backends.
+
+    Trade-off: the JVM cold-starts on every call (~0.5-1 s). Fine for
+    ad-hoc files; for log-file ingestion with hundreds of statements, prefer
+    a batched approach (see README).
+    """
+
+    label = "Local JAR"
+
+    def __init__(self, jar_path: str, java_bin: str = "java", timeout: int = 120):
+        self.jar_path = jar_path
+        self.java_bin = java_bin
+        self.timeout = timeout
+
+    def get_lineage(self, sql: str, db_vendor: str, **kwargs) -> dict[str, Any]:
+        if not os.path.isfile(self.jar_path):
+            raise SQLFlowError(
+                f"{self.label}: jar not found at {self.jar_path!r}. "
+                f"The sidecar does not bundle the SQLFlow JAR — set "
+                f"sqlflow.jar_path (or --jar-path / GSP_JAR_PATH) to the "
+                f"absolute path of a licensed gsqlparser-*-shaded.jar."
+            )
+        if shutil.which(self.java_bin) is None and not os.path.isfile(self.java_bin):
+            raise SQLFlowError(
+                f"{self.label}: java executable '{self.java_bin}' not found on PATH. "
+                f"Install a JRE (8+) or set sqlflow.java_bin / --java-bin."
+            )
+
+        # DataFlowAnalyzer only accepts /f <file> or /d <dir>; no stdin mode.
+        # Stage the SQL in a temp file and clean up after.
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sql", prefix="gsp_", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(sql)
+            tmp_path = f.name
+        try:
+            cmd = [
+                self.java_bin, "-cp", self.jar_path,
+                "gudusoft.gsqlparser.dlineage.DataFlowAnalyzer",
+                "/f", tmp_path,
+                "/t", _cli_vendor_name(db_vendor),
+                "/json",
+            ]
+            logger.debug("Invoking %s: %s", self.label, " ".join(cmd))
+            try:
+                proc = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=self.timeout,
+                )
+            except subprocess.TimeoutExpired as e:
+                raise SQLFlowError(
+                    f"{self.label}: JAR invocation timed out after {self.timeout}s"
+                ) from e
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        if proc.returncode != 0:
+            raise SQLFlowError(
+                f"{self.label}: java exited with code {proc.returncode}. "
+                f"stderr: {proc.stderr.strip()[:500]}",
+                status_code=proc.returncode,
+            )
+
+        try:
+            dataflow = json.loads(proc.stdout)
+        except json.JSONDecodeError as e:
+            raise SQLFlowError(
+                f"{self.label}: could not parse JAR stdout as JSON: {e}. "
+                f"First 200 chars of stdout: {proc.stdout[:200]!r}"
+            ) from e
+
+        # Cloud SQLFlow reports syntax errors inside an ``errors`` array while
+        # still returning any relationships it managed to parse. Mirror that:
+        # log a warning and let the mapper harvest what it can.
+        errs = dataflow.get("errors") or []
+        if errs:
+            logger.warning(
+                "%s: parser reported %d error(s); first: %s",
+                self.label, len(errs),
+                (errs[0].get("errorMessage") if isinstance(errs[0], dict) else errs[0]),
+            )
+
+        return {"code": 200, "data": dataflow}
+
+
 def create_backend(config: SQLFlowConfig) -> SQLFlowBackend:
     """Factory: create the right backend based on config mode."""
+    if config.mode == "local_jar":
+        logger.info("Using local-JAR backend: %s", config.jar_path)
+        return LocalJarBackend(
+            jar_path=config.jar_path or "",
+            java_bin=config.java_bin or "java",
+        )
+
     url = config.effective_url
 
     if config.mode == "anonymous":

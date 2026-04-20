@@ -1,24 +1,30 @@
 # gsp-datahub-sidecar configuration
 #
-# Three backend modes — uncomment the one you need:
+# Four backend modes — uncomment the one you need:
 #
 #   anonymous   : No signup needed. 50 calls/day per IP. Good for evaluation.
 #   authenticated: userId + secretKey on api.gudusoft.com. 10k calls/month.
 #                  Sign up at https://docs.gudusoft.com/sign-up/
 #   self_hosted : Your own SQLFlow Docker. Unlimited. Data stays in your VPC.
+#   local_jar   : Invoke a licensed gsqlparser-*-shaded.jar directly via
+#                 subprocess. No network, no Docker — SQL never leaves the
+#                 process. Requires a JRE (8+) and a JAR you're licensed to
+#                 run; the sidecar does NOT bundle the SQLFlow JAR.
 #
 # `authenticated` and `self_hosted` use the same SQLFlow token-exchange
 # protocol (userId + secretKey -> JWT -> lineage call) — only the host differs.
+# `local_jar` skips HTTP entirely and calls DataFlowAnalyzer's CLI.
 #
 # All settings can be overridden with environment variables:
 #   GSP_BACKEND_MODE, GSP_SQLFLOW_URL, GSP_SQLFLOW_USER_ID, GSP_SQLFLOW_SECRET_KEY,
-#   GSP_DATAHUB_SERVER, GSP_DATAHUB_TOKEN, GSP_DB_VENDOR
+#   GSP_DATAHUB_SERVER, GSP_DATAHUB_TOKEN, GSP_DB_VENDOR,
+#   GSP_JAR_PATH, GSP_JAVA_BIN
 
 # ---------------------------------------------------------------------------
 # SQLFlow backend
 # ---------------------------------------------------------------------------
 sqlflow:
-  # Backend mode: anonymous | authenticated | self_hosted
+  # Backend mode: anonymous | authenticated | self_hosted | local_jar
   mode: anonymous
 
   # Override the SQLFlow API URL (optional — each mode has a sensible default).
@@ -40,6 +46,14 @@ sqlflow:
 
   # Relation types to request (comma-separated: fdd, fdr, join, call, er)
   show_relation_type: fdd
+
+  # --- local_jar mode only ---
+  # Absolute path to a licensed gsqlparser-*-shaded.jar. Required when
+  # mode: local_jar. The sidecar does not bundle this JAR — supply your own.
+  # jar_path: /path/to/your/gsqlparser-4.1.0.13-shaded.jar
+  #
+  # Java executable. Defaults to 'java' on PATH; set if you need a specific JDK.
+  # java_bin: java
 
 # ---------------------------------------------------------------------------
 # DataHub connection

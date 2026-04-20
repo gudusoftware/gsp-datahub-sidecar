@@ -45,15 +45,16 @@ gsp-datahub-sidecar --sql "DECLARE x INT; CREATE VIEW v AS SELECT a FROM t" --dr
 gsp-datahub-sidecar --config sidecar.yaml --log-file /var/log/datahub/ingest.log
 ```
 
-## Three backend modes
+## Four backend modes
 
 | Mode | Auth | Limit | Data location | Use case |
 |---|---|---|---|---|
 | `anonymous` (default) | None | 50/day per IP | SQL sent to api.gudusoft.com | Quick evaluation |
 | `authenticated` | `userId` + `secretKey` (token-exchange) | 10k/month | SQL sent to api.gudusoft.com | Extended evaluation |
 | `self_hosted` | `userId` + `secretKey` (token-exchange) | Unlimited | SQL stays in your VPC | Production |
+| `local_jar` | None (local subprocess) | Governed by your JAR license | SQL never leaves the process | Air-gapped / CI (bring your own licensed JAR) |
 
-The `authenticated` and `self_hosted` tiers use the **same** SQLFlow token-exchange protocol and hit the same `exportFullLineageAsJson` endpoint — only the host differs (api.gudusoft.com vs. your Docker).
+The `authenticated` and `self_hosted` tiers use the **same** SQLFlow token-exchange protocol and hit the same `exportFullLineageAsJson` endpoint — only the host differs (api.gudusoft.com vs. your Docker). The `local_jar` tier skips HTTP entirely and invokes SQLFlow's bundled `DataFlowAnalyzer` CLI via `java`; it produces the same `Dataflow` JSON model as the cloud path, so lineage extraction is bit-for-bit equivalent.
 
 ### Anonymous (default, zero setup)
 
@@ -100,6 +101,27 @@ gsp-datahub-sidecar --mode self_hosted \
   --sql-file queries.sql
 ```
 
+### Local JAR (no network, no Docker) — bring your own licensed JAR
+
+> **The sidecar does not ship `gsqlparser-*-shaded.jar`.** Gudu SQLFlow's core parser JAR is a commercial product licensed separately from this sidecar (Apache 2.0). Point `--jar-path` at a JAR you are licensed to run — for example the one built from your `gsp_java_core` checkout. See [sqlflow.gudusoft.com](https://sqlflow.gudusoft.com) for licensing.
+
+With a licensed `gsqlparser-*-shaded.jar` on disk, the sidecar can invoke it directly as a subprocess — no HTTP round-trip, no Docker, SQL never leaves the process. Requires a JRE 8+ on `PATH`.
+
+```bash
+gsp-datahub-sidecar --mode local_jar \
+  --jar-path /path/to/your/gsqlparser-4.1.0.13-shaded.jar \
+  --sql-file queries.sql
+```
+
+Equivalent config / env:
+
+- `sqlflow.mode: local_jar` + `sqlflow.jar_path: /path/to/...jar` in `sidecar.yaml`
+- `GSP_BACKEND_MODE=local_jar GSP_JAR_PATH=/path/to/...jar`
+
+Use a non-default JVM with `--java-bin /opt/jdk21/bin/java` (or `GSP_JAVA_BIN`).
+
+This path uses the exact same `Dataflow` JSON model as the cloud `exportFullLineageAsJson` endpoint, so lineage output is identical. The one cost is JVM cold-start (~0.5–1 s per call), so for log-file ingestion of many statements, prefer `self_hosted` or batch upstream.
+
 `--sqlflow-url` is **optional** in self-hosted mode and defaults to:
 
 ```
@@ -133,6 +155,8 @@ Copy `sidecar.yaml.example` to `sidecar.yaml` and edit. All settings can also be
 | `GSP_DATAHUB_SERVER` | `datahub.server` | DataHub GMS URL |
 | `GSP_DATAHUB_TOKEN` | `datahub.token` | DataHub auth token |
 | `GSP_COLUMN_LINEAGE` | `datahub.column_lineage` | Emit column-level lineage (default `true`) |
+| `GSP_JAR_PATH` | `sqlflow.jar_path` | Path to `gsqlparser-*-shaded.jar` — required for `local_jar` mode |
+| `GSP_JAVA_BIN` | `sqlflow.java_bin` | Java executable for `local_jar` mode (default: `java` on PATH) |
 
 ## Dry run vs. live mode
 
@@ -406,4 +430,4 @@ gsp-datahub-sidecar --sql-file /path/to/your/query.sql --dry-run
 
 ## Licensing
 
-This sidecar (glue code) is Apache 2.0 licensed. [Gudu SQLFlow](https://sqlflow.gudusoft.com) is a commercial product by Gudu Software. The anonymous tier provides free evaluation access. For production use, deploy the self-hosted SQLFlow Docker with a license.
+This sidecar (glue code) is Apache 2.0 licensed. [Gudu SQLFlow](https://sqlflow.gudusoft.com) is a commercial product by Gudu Software. The anonymous tier provides free evaluation access. For production use, deploy the self-hosted SQLFlow Docker with a license, **or** supply your own licensed `gsqlparser-*-shaded.jar` to `--mode local_jar` — the sidecar does not bundle or redistribute the SQLFlow JAR.

@@ -42,7 +42,9 @@ def main():
             "  # Use authenticated mode with a personal key:\n"
             "  GSP_BACKEND_MODE=authenticated GSP_SQLFLOW_SECRET_KEY=sk-xxx gsp-datahub-sidecar --sql-file q.sql\n\n"
             "  # Use self-hosted Docker:\n"
-            "  gsp-datahub-sidecar --config sidecar.yaml --mode self_hosted --sqlflow-url http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson\n"
+            "  gsp-datahub-sidecar --config sidecar.yaml --mode self_hosted --sqlflow-url http://localhost:8165/api/gspLive_backend/sqlflow/generation/sqlflow/exportFullLineageAsJson\n\n"
+            "  # Use your own licensed gsp.jar locally (no network, no Docker):\n"
+            "  gsp-datahub-sidecar --mode local_jar --jar-path /path/to/your/gsqlparser-4.1.0.13-shaded.jar --sql-file q.sql\n"
         ),
     )
 
@@ -71,7 +73,7 @@ def main():
     # --- CLI overrides (take precedence over config file) ---
     parser.add_argument(
         "--mode",
-        choices=["anonymous", "authenticated", "self_hosted"],
+        choices=["anonymous", "authenticated", "self_hosted", "local_jar"],
         help="SQLFlow backend mode (overrides config file).",
     )
     parser.add_argument(
@@ -89,6 +91,18 @@ def main():
     parser.add_argument(
         "--db-vendor",
         help="SQL dialect (default: dbvbigquery).",
+    )
+    parser.add_argument(
+        "--jar-path",
+        help=(
+            "Path to a licensed gsqlparser-*-shaded.jar (required for "
+            "--mode local_jar). The sidecar does not bundle this JAR — "
+            "supply your own."
+        ),
+    )
+    parser.add_argument(
+        "--java-bin",
+        help="java executable to invoke in local_jar mode (default: 'java' on PATH).",
     )
 
     # --- DataHub ---
@@ -155,6 +169,10 @@ def main():
         config.sqlflow.secret_key = args.secret_key
     if args.db_vendor:
         config.sqlflow.db_vendor = args.db_vendor
+    if args.jar_path:
+        config.sqlflow.jar_path = args.jar_path
+    if args.java_bin:
+        config.sqlflow.java_bin = args.java_bin
     if args.datahub_server:
         config.datahub.server = args.datahub_server
     if args.datahub_token:
@@ -254,7 +272,7 @@ def main():
     logger.info("Errors: %d", errors)
     logger.info("Table-level lineages found:      %d", len(all_lineages))
     if config.datahub.column_lineage:
-        logger.info("Column-level mappings extracted: %d (wildcards filtered at emit time)",
+        logger.info("Column-level mappings extracted: %d",
                     total_column_mappings)
     else:
         logger.info("Column-level lineage disabled (--no-column-lineage)")

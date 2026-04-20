@@ -1,14 +1,19 @@
 """Tests for backend — SQLFlow API client."""
 
+import subprocess
+from unittest.mock import patch
+
 import pytest
 import responses
 
 from gsp_datahub_sidecar.backend import (
     AnonymousBackend,
     AuthenticatedBackend,
+    LocalJarBackend,
     RateLimitError,
     SQLFlowError,
     SelfHostedBackend,
+    _cli_vendor_name,
     create_backend,
 )
 from gsp_datahub_sidecar.config import SQLFlowConfig
@@ -255,3 +260,108 @@ def test_create_backend_self_hosted():
     cfg = SQLFlowConfig(mode="self_hosted")
     backend = create_backend(cfg)
     assert isinstance(backend, SelfHostedBackend)
+
+
+# ---------------------------------------------------------------------------
+# local_jar mode
+# ---------------------------------------------------------------------------
+
+def test_cli_vendor_name_strips_dbv_prefix():
+    # The JAR's /t flag expects the short alias (``bigquery``, not
+    # ``dbvbigquery``); EDbVendor.fromAlias silently falls back to Oracle
+    # otherwise — so every non-Oracle stmt becomes a syntax error.
+    assert _cli_vendor_name("dbvbigquery") == "bigquery"
+    assert _cli_vendor_name("DBVMSSQL") == "mssql"
+    assert _cli_vendor_name("snowflake") == "snowflake"
+    assert _cli_vendor_name("") == "generic"
+
+
+def _fake_proc(stdout="", stderr="", returncode=0):
+    return subprocess.CompletedProcess(args=[], returncode=returncode,
+                                       stdout=stdout, stderr=stderr)
+
+
+@patch("gsp_datahub_sidecar.backend.shutil.which", return_value="/usr/bin/java")
+@patch("gsp_datahub_sidecar.backend.os.path.isfile", return_value=True)
+@patch("gsp_datahub_sidecar.backend.subprocess.run")
+def test_local_jar_success(mock_run, _mock_isfile, _mock_which):
+    """Stdout from the JAR is wrapped as {code:200, data:<dataflow>}."""
+    dataflow = {
+        "dbobjs": {"servers": []},
+        "relationships": [{"id": "r1", "effectType": "insert"}],
+        "processes": [],
+    }
+    mock_run.return_value = _fake_proc(stdout=__import__("json").dumps(dataflow))
+
+    backend = LocalJarBackend(jar_path="/fake/gsp.jar")
+    result = backend.get_lineage("SELECT 1", "dbvbigquery")
+
+    assert result == {"code": 200, "data": dataflow}
+
+    # Verify the CLI invocation: classpath, main class, /f <tmp>, /t bigquery, /json
+    args = mock_run.call_args[0][0]
+    assert args[0] == "java"
+    assert args[1] == "-cp"
+    assert args[2] == "/fake/gsp.jar"
+    assert args[3] == "gudusoft.gsqlparser.dlineage.DataFlowAnalyzer"
+    assert args[4] == "/f" and args[5].endswith(".sql")
+    assert args[6] == "/t" and args[7] == "bigquery"  # stripped from dbvbigquery
+    assert args[8] == "/json"
+
+
+@patch("gsp_datahub_sidecar.backend.shutil.which", return_value="/usr/bin/java")
+@patch("gsp_datahub_sidecar.backend.os.path.isfile", return_value=True)
+@patch("gsp_datahub_sidecar.backend.subprocess.run")
+def test_local_jar_parser_errors_are_warnings_not_failures(mock_run, _mock_isfile, _mock_which, caplog):
+    """Mirror cloud SQLFlow: syntax errors land in ``errors[]`` alongside any
+    relationships that did parse — don't fail the whole call."""
+    dataflow = {
+        "dbobjs": {},
+        "relationships": [],
+        "errors": [{"errorMessage": "syntax error near 'v'"}],
+    }
+    mock_run.return_value = _fake_proc(stdout=__import__("json").dumps(dataflow))
+
+    backend = LocalJarBackend(jar_path="/fake/gsp.jar")
+    with caplog.at_level("WARNING"):
+        result = backend.get_lineage("bogus", "dbvbigquery")
+
+    assert result["code"] == 200
+    assert "syntax error" in caplog.text
+
+
+@patch("gsp_datahub_sidecar.backend.shutil.which", return_value="/usr/bin/java")
+@patch("gsp_datahub_sidecar.backend.os.path.isfile", return_value=True)
+@patch("gsp_datahub_sidecar.backend.subprocess.run")
+def test_local_jar_nonzero_exit_raises(mock_run, _mock_isfile, _mock_which):
+    mock_run.return_value = _fake_proc(stdout="", stderr="NoClassDefFound", returncode=1)
+
+    backend = LocalJarBackend(jar_path="/fake/gsp.jar")
+    with pytest.raises(SQLFlowError, match="exited with code 1"):
+        backend.get_lineage("SELECT 1", "dbvbigquery")
+
+
+@patch("gsp_datahub_sidecar.backend.shutil.which", return_value="/usr/bin/java")
+@patch("gsp_datahub_sidecar.backend.os.path.isfile", return_value=True)
+@patch("gsp_datahub_sidecar.backend.subprocess.run")
+def test_local_jar_timeout_raises(mock_run, _mock_isfile, _mock_which):
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd="java", timeout=120)
+
+    backend = LocalJarBackend(jar_path="/fake/gsp.jar", timeout=120)
+    with pytest.raises(SQLFlowError, match="timed out"):
+        backend.get_lineage("SELECT 1", "dbvbigquery")
+
+
+@patch("gsp_datahub_sidecar.backend.os.path.isfile", return_value=False)
+def test_local_jar_missing_jar_surfaces_clear_error(_mock_isfile):
+    backend = LocalJarBackend(jar_path="/nope/gsp.jar")
+    with pytest.raises(SQLFlowError, match="jar not found"):
+        backend.get_lineage("SELECT 1", "dbvbigquery")
+
+
+def test_create_backend_local_jar():
+    cfg = SQLFlowConfig(mode="local_jar", jar_path="/fake/gsp.jar", java_bin="java")
+    backend = create_backend(cfg)
+    assert isinstance(backend, LocalJarBackend)
+    assert backend.jar_path == "/fake/gsp.jar"
+    assert backend.java_bin == "java"

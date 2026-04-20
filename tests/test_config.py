@@ -118,6 +118,47 @@ sqlflow:
     os.unlink(f.name)
 
 
+def test_local_jar_requires_jar_path(monkeypatch):
+    monkeypatch.delenv("GSP_JAR_PATH", raising=False)
+    yaml_content = """
+sqlflow:
+  mode: local_jar
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        with pytest.raises(ValueError, match="jar_path is required"):
+            load_config(f.name)
+    os.unlink(f.name)
+
+
+def test_local_jar_loads_jar_path_from_yaml(monkeypatch):
+    monkeypatch.delenv("GSP_JAR_PATH", raising=False)
+    yaml_content = """
+sqlflow:
+  mode: local_jar
+  jar_path: /opt/gsp/gsqlparser-4.1.0.13-shaded.jar
+  java_bin: /opt/jdk21/bin/java
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        cfg = load_config(f.name)
+
+    assert cfg.sqlflow.mode == "local_jar"
+    assert cfg.sqlflow.jar_path == "/opt/gsp/gsqlparser-4.1.0.13-shaded.jar"
+    assert cfg.sqlflow.java_bin == "/opt/jdk21/bin/java"
+    os.unlink(f.name)
+
+
+def test_local_jar_env_override(monkeypatch):
+    monkeypatch.setenv("GSP_BACKEND_MODE", "local_jar")
+    monkeypatch.setenv("GSP_JAR_PATH", "/env/gsp.jar")
+    cfg = load_config(config_path=None)
+    assert cfg.sqlflow.mode == "local_jar"
+    assert cfg.sqlflow.jar_path == "/env/gsp.jar"
+
+
 def test_effective_url_defaults():
     cfg = load_config(config_path=None)
     assert cfg.sqlflow.mode == "anonymous"

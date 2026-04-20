@@ -26,10 +26,16 @@ class SQLFlowConfig:
     secret_key: Optional[str] = None
     db_vendor: str = "dbvbigquery"
     show_relation_type: str = "fdd"
+    # local_jar mode only:
+    jar_path: Optional[str] = None
+    java_bin: str = "java"
 
     @property
     def effective_url(self) -> str:
-        """Return the explicit URL if set, otherwise the default for the mode."""
+        """Return the explicit URL if set, otherwise the default for the mode.
+
+        ``local_jar`` mode has no URL — call sites must branch on mode first.
+        """
         if self.url:
             return self.url
         return DEFAULT_URLS[self.mode]
@@ -83,6 +89,8 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
         cfg.sqlflow.secret_key = sf.get("secret_key", cfg.sqlflow.secret_key)
         cfg.sqlflow.db_vendor = sf.get("db_vendor", cfg.sqlflow.db_vendor)
         cfg.sqlflow.show_relation_type = sf.get("show_relation_type", cfg.sqlflow.show_relation_type)
+        cfg.sqlflow.jar_path = sf.get("jar_path", cfg.sqlflow.jar_path)
+        cfg.sqlflow.java_bin = sf.get("java_bin", cfg.sqlflow.java_bin)
 
         dh = raw.get("datahub", {})
         cfg.datahub.server = dh.get("server", cfg.datahub.server)
@@ -105,6 +113,8 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
         "GSP_SQLFLOW_SECRET_KEY": ("sqlflow", "secret_key"),
         "GSP_DB_VENDOR": ("sqlflow", "db_vendor"),
         "GSP_SHOW_RELATION_TYPE": ("sqlflow", "show_relation_type"),
+        "GSP_JAR_PATH": ("sqlflow", "jar_path"),
+        "GSP_JAVA_BIN": ("sqlflow", "java_bin"),
         "GSP_DATAHUB_SERVER": ("datahub", "server"),
         "GSP_DATAHUB_TOKEN": ("datahub", "token"),
         "GSP_DATAHUB_PLATFORM": ("datahub", "platform"),
@@ -125,7 +135,7 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
             setattr(getattr(cfg, section), attr, val)
 
     # --- Validate ---
-    valid_modes = {"anonymous", "authenticated", "self_hosted"}
+    valid_modes = {"anonymous", "authenticated", "self_hosted", "local_jar"}
     if cfg.sqlflow.mode not in valid_modes:
         raise ValueError(
             f"Invalid sqlflow.mode '{cfg.sqlflow.mode}'. Must be one of: {valid_modes}"
@@ -138,6 +148,14 @@ def load_config(config_path: Optional[str] = None) -> SidecarConfig:
             "sqlflow.user_id and sqlflow.secret_key are both required when mode is "
             "'authenticated' — SQLFlow uses a userId + secretKey token-exchange flow. "
             "Get credentials at https://docs.gudusoft.com/sign-up/"
+        )
+
+    if cfg.sqlflow.mode == "local_jar" and not cfg.sqlflow.jar_path:
+        raise ValueError(
+            "sqlflow.jar_path is required when mode is 'local_jar'. "
+            "Point it at gsqlparser-*-shaded.jar (e.g. "
+            "/path/to/gsp_java_core/target/gsqlparser-4.1.0.13-shaded.jar), "
+            "or set GSP_JAR_PATH / pass --jar-path."
         )
 
     return cfg
